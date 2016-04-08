@@ -81,11 +81,25 @@ handler (void *ptr)
   ensure(request->fio)
     errorf("fdopen failed");
 
+#ifdef LUA51
+  FILE **fio = lua_newuserdata(request->lua, sizeof(FILE*));
+  *fio = request->fio;
+  luaL_getmetatable(request->lua, LUA_FILEHANDLE);
+  lua_setmetatable(request->lua, -2);
+  lua_createtable(request->lua, 0, 1);
+  lua_pushcfunction(request->lua, close_io);
+  lua_setfield(request->lua, -2, "__close");
+  lua_setfenv(request->lua, -2);
+  lua_setglobal(request->lua, "sock");
+#endif
+
+#ifdef LUA52
   luaL_Stream *s = lua_newuserdata(request->lua, sizeof(luaL_Stream));
   s->f = request->fio;
   s->closef = close_io;
   luaL_setmetatable(request->lua, LUA_FILEHANDLE);
   lua_setglobal(request->lua, "sock");
+#endif
 
   request->rc = EXIT_SUCCESS;
 
@@ -185,7 +199,7 @@ main(int argc, char const *argv[])
     ensure(pw && setuid(pw->pw_uid) == 0)
       errorf("setuid %s failed", cfg.setuid_name);
   }
-  
+
   int fd;
 
   while ((fd = accept(sock_fd, NULL, NULL)) && fd >= 0)
