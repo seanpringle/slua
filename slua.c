@@ -20,6 +20,10 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <signal.h>
+#include <sys/stat.h>
+#include <dirent.h>
+#include <pwd.h>
+#include <grp.h>
 
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
 #define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
@@ -219,6 +223,123 @@ lua_popstring (lua_State *lua)
 }
 
 int
+posix_ls (lua_State *lua)
+{
+  char *path = (char*)lua_popstring(lua);
+
+  DIR *dp;
+  struct dirent *ep;
+
+  if ((dp = opendir(path)))
+  {
+    int items = 0;
+    lua_createtable(lua, 0, 0);
+
+    while ((ep = readdir(dp)))
+    {
+      lua_pushnumber(lua, ++items);
+      lua_pushstring(lua, ep->d_name);
+      lua_settable(lua, -3);
+    }
+    closedir(dp);
+  }
+  else
+  {
+    lua_pushnil(lua);
+  }
+  return 1;
+}
+
+int
+posix_stat (lua_State *lua)
+{
+  char *path = (char*)lua_popstring(lua);
+
+  struct stat st;
+  int exists = stat(path, &st) == 0;
+
+  if (exists)
+  {
+    char mode[11];
+    strcpy(mode, "----------");
+    int i = 0;
+
+    if (S_ISDIR(st.st_mode))  mode[i] = 'd'; i++;
+    if (st.st_mode & S_IRUSR) mode[i] = 'r'; i++;
+    if (st.st_mode & S_IWUSR) mode[i] = 'w'; i++;
+    if (st.st_mode & S_IXUSR) mode[i] = 'x'; i++;
+    if (st.st_mode & S_IRGRP) mode[i] = 'r'; i++;
+    if (st.st_mode & S_IWGRP) mode[i] = 'w'; i++;
+    if (st.st_mode & S_IXGRP) mode[i] = 'x'; i++;
+    if (st.st_mode & S_IROTH) mode[i] = 'r'; i++;
+    if (st.st_mode & S_IWOTH) mode[i] = 'w'; i++;
+    if (st.st_mode & S_IXOTH) mode[i] = 'x'; i++;
+
+    int gsize = (int) sysconf(_SC_GETGR_R_SIZE_MAX);
+    char *gbuff = malloc(gsize);
+    struct group _grp, *grp = &_grp;
+
+    int grs = getgrgid_r(st.st_gid, grp, gbuff, gsize, &grp);
+
+    int psize = (int) sysconf(_SC_GETPW_R_SIZE_MAX);
+    char *pbuff = malloc(psize);
+    struct passwd _pwd, *pwd = &_pwd;
+
+    int prs = getpwuid_r(st.st_uid, pwd, pbuff, psize, &pwd);
+
+    lua_createtable(lua, 0, 0);
+
+    lua_pushstring(lua, "size");
+    lua_pushnumber(lua, st.st_size);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "inode");
+    lua_pushnumber(lua, st.st_ino);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "uid");
+    lua_pushnumber(lua, st.st_uid);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "gid");
+    lua_pushnumber(lua, st.st_gid);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "user");
+    lua_pushstring(lua, (prs == 0 && pwd ? pwd->pw_name: ""));
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "group");
+    lua_pushstring(lua, (grs == 0 && grp ? grp->gr_name: ""));
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "mode");
+    lua_pushstring(lua, mode);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "ctime");
+    lua_pushnumber(lua, (long long)st.st_ctim.tv_sec);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "mtime");
+    lua_pushnumber(lua, (long long)st.st_mtim.tv_sec);
+    lua_settable(lua, -3);
+    lua_pushstring(lua, "atime");
+    lua_pushnumber(lua, (long long)st.st_atim.tv_sec);
+    lua_settable(lua, -3);
+
+    free(gbuff);
+    free(pbuff);
+  }
+  else
+  {
+    lua_pushnil(lua);
+  }
+  return 1;
+}
+
+void
+lua_functions(lua_State *lua)
+{
+  lua_pushcfunction(lua, posix_stat);
+  lua_setglobal(lua, "stat");
+  lua_pushcfunction(lua, posix_ls);
+  lua_setglobal(lua, "ls");
+}
+
+int
 job_accept (lua_State *lua)
 {
   message_t *message = channel_read(&jobs);
@@ -303,6 +424,8 @@ main_worker (void *ptr)
 
   lua_setglobal(worker->lua, "job");
 
+  lua_functions(worker->lua);
+
   if ( (cfg.worker_path && luaL_dofile(worker->lua,   cfg.worker_path) != 0)
     || (cfg.worker_code && luaL_dostring(worker->lua, cfg.worker_code) != 0))
   {
@@ -379,6 +502,8 @@ main_handler (void *ptr)
     lua_settable(handler->lua, -3);
 
     lua_setglobal(handler->lua, "job");
+
+    lua_functions(handler->lua);
 
     if ( (cfg.handler_path && luaL_dofile(handler->lua,   cfg.handler_path) != 0)
       || (cfg.handler_code && luaL_dostring(handler->lua, cfg.handler_code) != 0))
