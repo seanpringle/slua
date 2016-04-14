@@ -453,9 +453,9 @@ start(int argc, const char *argv[])
       cfg.mode = MODE_TCP;
       continue;
     }
-    if (str_eq(argv[argi], "-u") || str_eq(argv[argi], "--user"))
+    if (str_eq(argv[argi], "-su") || str_eq(argv[argi], "--setuid"))
     {
-      ensure(argi < argc-1) errorf("expected (-u|--user) <value>");
+      ensure(argi < argc-1) errorf("expected (-su|--setuid) <value>");
       cfg.setuid_name = argv[++argi];
       continue;
     }
@@ -465,9 +465,9 @@ start(int argc, const char *argv[])
       cfg.worker_path = argv[++argi];
       continue;
     }
-    if (str_eq(argv[argi], "-mw") || str_eq(argv[argi], "--max-workers"))
+    if (str_eq(argv[argi], "-wp") || str_eq(argv[argi], "--worker-pool"))
     {
-      ensure(argi < argc-1) errorf("expected (-mw|--max-workers) <value>");
+      ensure(argi < argc-1) errorf("expected (-wp|--worker-pool) <value>");
       cfg.max_workers = strtol(argv[++argi], NULL, 0);
       continue;
     }
@@ -477,9 +477,9 @@ start(int argc, const char *argv[])
       cfg.handler_path = argv[++argi];
       continue;
     }
-    if (str_eq(argv[argi], "-mh") || str_eq(argv[argi], "--max-handlers"))
+    if (str_eq(argv[argi], "-hp") || str_eq(argv[argi], "--handler-pool"))
     {
-      ensure(argi < argc-1) errorf("expected (-mh|--max-handlers) <value>");
+      ensure(argi < argc-1) errorf("expected (-hp|--handler-pool) <value>");
       cfg.max_handlers = strtol(argv[++argi], NULL, 0);
       continue;
     }
