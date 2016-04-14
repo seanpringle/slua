@@ -33,6 +33,12 @@ static pthread_key_t key_self;
 pthread_mutex_t stdout_mutex;
 pthread_mutex_t stderr_mutex;
 
+#define outputf(...) ({ \
+  pthread_mutex_lock(&stdout_mutex); \
+  fprintf(stdout, __VA_ARGS__); fputc('\n', stdout); \
+  pthread_mutex_unlock(&stdout_mutex); \
+})
+
 #define errorf(...) ({ \
   pthread_mutex_lock(&stderr_mutex); \
   fprintf(stderr, "%lx: ", (uint64_t)pthread_getspecific(key_self)); \
@@ -145,13 +151,19 @@ channel_write (channel_t *channel, void *msg)
   pthread_mutex_unlock(&channel->mutex);
 }
 
+#define MODE_TCP 1
+#define MODE_STDIN 2
+
 typedef struct {
+  int mode;
   int tcp_port;
   int tcp_backlog;
   size_t max_workers;
   const char *worker_path;
+  const char *worker_code;
   size_t max_handlers;
   const char *handler_path;
+  const char *handler_code;
   const char *setuid_name;
 } config_t;
 
@@ -214,7 +226,7 @@ job_accept (lua_State *lua)
 }
 
 int
-job_respond (lua_State *lua)
+job_result (lua_State *lua)
 {
   char *payload = (char*)lua_popstring(lua);
   channel_write(wself->result, strdup(payload));
@@ -250,7 +262,7 @@ job_collect (lua_State *lua)
 int
 close_io (lua_State *lua)
 {
-  if (hself->fio)
+  if (hself->fio && hself->io != fileno(stdin))
   {
     fclose(hself->fio);
     hself->fio = NULL;
@@ -268,8 +280,6 @@ main_worker (void *ptr)
   ensure(pthread_setspecific(key_self, worker) == 0)
     errorf("pthread_setspecific failed");
 
-  errorf("worker");
-
   ensure((worker->lua = luaL_newstate()))
     errorf("luaL_newstate failed");
 
@@ -283,13 +293,14 @@ main_worker (void *ptr)
   lua_pushcfunction(worker->lua, job_accept);
   lua_settable(worker->lua, -3);
 
-  lua_pushstring(worker->lua, "respond");
-  lua_pushcfunction(worker->lua, job_respond);
+  lua_pushstring(worker->lua, "result");
+  lua_pushcfunction(worker->lua, job_result);
   lua_settable(worker->lua, -3);
 
   lua_setglobal(worker->lua, "job");
 
-  if (luaL_dofile(worker->lua, cfg.worker_path) != 0)
+  if ( (cfg.worker_path && luaL_dofile(worker->lua,   cfg.worker_path) != 0)
+    || (cfg.worker_code && luaL_dostring(worker->lua, cfg.worker_code) != 0))
   {
     errorf("lua error: %s", lua_tostring(worker->lua, -1));
     worker->rc = EXIT_FAILURE;
@@ -312,8 +323,6 @@ main_handler (void *ptr)
   ensure(pthread_setspecific(key_self, handler) == 0)
     errorf("pthread_setspecific failed");
 
-  errorf("handler");
-
   channel_init(&handler->results, 10);
 
   request_t *request = NULL;
@@ -328,7 +337,7 @@ main_handler (void *ptr)
 
     luaL_openlibs(handler->lua);
 
-    handler->fio = fdopen(handler->io, "r+");
+    handler->fio = handler->io == fileno(stdin) ? stdin: fdopen(handler->io, "r+");
 
     ensure(handler->fio)
       errorf("fdopen failed");
@@ -367,7 +376,8 @@ main_handler (void *ptr)
 
     lua_setglobal(handler->lua, "job");
 
-    if (luaL_dofile(handler->lua, cfg.handler_path) != 0)
+    if ( (cfg.handler_path && luaL_dofile(handler->lua,   cfg.handler_path) != 0)
+      || (cfg.handler_code && luaL_dostring(handler->lua, cfg.handler_code) != 0))
     {
       errorf("lua error: %s", lua_tostring(handler->lua, -1));
       handler->rc = EXIT_FAILURE;
@@ -410,12 +420,15 @@ start(int argc, const char *argv[])
 {
   long cores = sysconf(_SC_NPROCESSORS_ONLN);
 
-  cfg.tcp_port     = 80;
+  cfg.mode         = MODE_STDIN;
+  cfg.tcp_port     = 0;
   cfg.tcp_backlog  = 32;
   cfg.max_workers  = cores;
-  cfg.max_handlers = cores*2;
+  cfg.max_handlers = 1;
   cfg.handler_path = NULL;
+  cfg.handler_code = NULL;
   cfg.worker_path  = NULL;
+  cfg.worker_code  = NULL;
   cfg.setuid_name  = NULL;
 
   signal(SIGINT,  sig_int);
@@ -431,6 +444,7 @@ start(int argc, const char *argv[])
     {
       ensure(argi < argc-1) errorf("expected (-p|--port) <value>");
       cfg.tcp_port = strtol(argv[++argi], NULL, 0);
+      cfg.mode = MODE_TCP;
       continue;
     }
     if (str_eq(argv[argi], "-u") || str_eq(argv[argi], "--user"))
@@ -457,18 +471,36 @@ start(int argc, const char *argv[])
       cfg.handler_path = argv[++argi];
       continue;
     }
-    if (str_eq(argv[argi], "-mr") || str_eq(argv[argi], "--max-handlers"))
+    if (str_eq(argv[argi], "-mh") || str_eq(argv[argi], "--max-handlers"))
     {
-      ensure(argi < argc-1) errorf("expected (-mr|--max-handlers) <value>");
+      ensure(argi < argc-1) errorf("expected (-mh|--max-handlers) <value>");
       cfg.max_handlers = strtol(argv[++argi], NULL, 0);
       continue;
     }
 
-    cfg.handler_path = argv[argi];
+    if (!cfg.handler_code)
+    {
+      cfg.handler_code = argv[argi];
+      continue;
+    }
+
+    if (!cfg.worker_code)
+    {
+      cfg.worker_code = argv[argi];
+      continue;
+    }
+
+    ensure(0) errorf("unexpected argument: %s", argv[argi]);
   }
 
-  ensure(cfg.handler_path)
-    errorf("expected script");
+  if (cfg.handler_path)
+    cfg.handler_code = NULL;
+
+  if (cfg.mode == MODE_TCP && cfg.max_handlers == 1)
+    cfg.max_handlers = max(4, cores);
+
+  ensure(cfg.handler_path || cfg.handler_code)
+    errorf("expected lua -r script or inline code");
 
   ensure(pthread_key_create(&key_self, NULL) == 0)
     errorf("pthread_key_create failed");
@@ -493,7 +525,7 @@ start(int argc, const char *argv[])
       errorf("pthread_create failed");
   }
 
-  channel_init(&reqs, 100);
+  channel_init(&reqs, 8);
 
   if (cfg.worker_path)
   {
@@ -517,7 +549,7 @@ start(int argc, const char *argv[])
         errorf("pthread_create failed");
     }
 
-    channel_init(&jobs, 100);
+    channel_init(&jobs, 8);
   }
 }
 
@@ -526,46 +558,59 @@ main(int argc, char const *argv[])
 {
   start(argc, argv);
 
-  int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
-
-  ensure(sock_fd >= 0)
-    errorf("socket failed");
-
-  int enable = 1;
-
-  ensure(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) == 0)
-    errorf("setsockopt(SO_REUSEADDR) failed");
-
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = htonl(INADDR_ANY);
-  addr.sin_port = htons(cfg.tcp_port);
-
-  ensure(bind(sock_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0)
-    errorf("bind failed");
-
-  ensure(listen(sock_fd, 32) == 0)
-    errorf("listen failed");
-
-  if (cfg.setuid_name)
+  if (cfg.mode == MODE_TCP)
   {
-    struct passwd *pw = getpwnam(cfg.setuid_name);
+    int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
-    ensure(pw && setuid(pw->pw_uid) == 0)
-      errorf("setuid %s failed", cfg.setuid_name);
+    ensure(sock_fd >= 0)
+      errorf("socket failed");
+
+    int enable = 1;
+
+    ensure(setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(int)) == 0)
+      errorf("setsockopt(SO_REUSEADDR) failed");
+
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(cfg.tcp_port);
+
+    ensure(bind(sock_fd, (struct sockaddr*)&addr, sizeof(addr)) == 0)
+      errorf("bind failed");
+
+    ensure(listen(sock_fd, 32) == 0)
+      errorf("listen failed");
+
+    if (cfg.setuid_name)
+    {
+      struct passwd *pw = getpwnam(cfg.setuid_name);
+
+      ensure(pw && setuid(pw->pw_uid) == 0)
+        errorf("setuid %s failed", cfg.setuid_name);
+    }
+
+    int fd;
+
+    while ((fd = accept(sock_fd, NULL, NULL)) && fd >= 0)
+    {
+      request_t *request = malloc(sizeof(request_t));
+      request->io = fd;
+
+      channel_write(&reqs, request);
+    }
+
+    return EXIT_FAILURE;
   }
 
-  int fd;
+  // MODE_STDIN
+  request_t *request = malloc(sizeof(request_t));
+  request->io = fileno(stdin);
+  channel_write(&reqs, request);
 
-  while ((fd = accept(sock_fd, NULL, NULL)) && fd >= 0)
-  {
-    request_t *request = malloc(sizeof(request_t));
-    request->io = fd;
+  while (!channel_readers(&reqs) || channel_backlog(&reqs))
+    usleep(1000);
 
-    channel_write(&reqs, request);
-  }
-
-  return EXIT_FAILURE;
+  return handlers[0].rc;
 }
