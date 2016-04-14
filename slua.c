@@ -69,9 +69,9 @@ channel_init (channel_t *channel, size_t cells)
   channel->writers = 0;
   channel->cells = cells;
   channel->queue = calloc(channel->cells, sizeof(void*));
-  pthread_mutex_init(&channel->mutex, NULL);
-  pthread_cond_init(&channel->cond_read, NULL);
-  pthread_cond_init(&channel->cond_write, NULL);
+  ensure(pthread_mutex_init(&channel->mutex, NULL) == 0);
+  ensure(pthread_cond_init(&channel->cond_read, NULL) == 0);
+  ensure(pthread_cond_init(&channel->cond_write, NULL) == 0);
 }
 
 void
@@ -90,65 +90,67 @@ channel_free (channel_t *channel)
 size_t
 channel_backlog (channel_t *channel)
 {
-  pthread_mutex_lock(&channel->mutex);
+  ensure(pthread_mutex_lock(&channel->mutex) == 0);
   size_t backlog = channel->backlog;
-  pthread_mutex_unlock(&channel->mutex);
+  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
   return backlog;
 }
 
 size_t
 channel_readers (channel_t *channel)
 {
-  pthread_mutex_lock(&channel->mutex);
+  ensure(pthread_mutex_lock(&channel->mutex) == 0);
   size_t readers = channel->readers;
-  pthread_mutex_unlock(&channel->mutex);
+  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
   return readers;
 }
 
 size_t
 channel_writers (channel_t *channel)
 {
-  pthread_mutex_lock(&channel->mutex);
+  ensure(pthread_mutex_lock(&channel->mutex) == 0);
   size_t writers = channel->writers;
-  pthread_mutex_unlock(&channel->mutex);
+  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
   return writers;
 }
 
 void*
 channel_read (channel_t *channel)
 {
-  pthread_mutex_lock(&channel->mutex);
+  ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->readers++;
 
-  while (!channel->backlog)
-  {
-    pthread_cond_signal(&channel->cond_write);
+  while (channel->backlog == 0)
     pthread_cond_wait(&channel->cond_read, &channel->mutex);
-  }
 
   void *msg = channel->queue[0];
   memmove(&channel->queue[0], &channel->queue[1], sizeof(void*) * (channel->cells-1));
   channel->backlog--;
 
+  if (channel->writers)
+    pthread_cond_signal(&channel->cond_write);
+
   channel->readers--;
-  pthread_mutex_unlock(&channel->mutex);
+  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
   return msg;
 }
 
 void
 channel_write (channel_t *channel, void *msg)
 {
-  pthread_mutex_lock(&channel->mutex);
+  ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
 
-  while (channel->backlog == channel->cells-1)
+  while (channel->backlog == channel->cells)
     pthread_cond_wait(&channel->cond_write, &channel->mutex);
 
   channel->queue[channel->backlog++] = msg;
-  pthread_cond_signal(&channel->cond_read);
+
+  if (channel->readers)
+    pthread_cond_signal(&channel->cond_read);
 
   channel->writers--;
-  pthread_mutex_unlock(&channel->mutex);
+  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
 }
 
 #define MODE_TCP 1
@@ -165,6 +167,8 @@ typedef struct {
   const char *handler_path;
   const char *handler_code;
   const char *setuid_name;
+  size_t max_jobs;
+  size_t max_results;
 } config_t;
 
 config_t cfg;
@@ -323,7 +327,7 @@ main_handler (void *ptr)
   ensure(pthread_setspecific(key_self, handler) == 0)
     errorf("pthread_setspecific failed");
 
-  channel_init(&handler->results, 10);
+  channel_init(&handler->results, cfg.max_results);
 
   request_t *request = NULL;
 
@@ -396,23 +400,23 @@ main_handler (void *ptr)
 }
 
 void
-stop()
+stop(int rc)
 {
-  exit(EXIT_SUCCESS);
+  exit(rc);
 }
 
 void
 sig_int(int sig)
 {
   errorf("SIGINT");
-  stop();
+  stop(EXIT_SUCCESS);
 }
 
 void
 sig_term(int sig)
 {
   errorf("SIGTERM");
-  stop();
+  stop(EXIT_SUCCESS);
 }
 
 void
@@ -430,6 +434,8 @@ start(int argc, const char *argv[])
   cfg.worker_path  = NULL;
   cfg.worker_code  = NULL;
   cfg.setuid_name  = NULL;
+  cfg.max_jobs     = 32;
+  cfg.max_results  = 32;
 
   signal(SIGINT,  sig_int);
   signal(SIGTERM, sig_term);
@@ -525,7 +531,7 @@ start(int argc, const char *argv[])
       errorf("pthread_create failed");
   }
 
-  channel_init(&reqs, 8);
+  channel_init(&reqs, cfg.max_handlers);
 
   if (cfg.worker_path)
   {
@@ -549,7 +555,7 @@ start(int argc, const char *argv[])
         errorf("pthread_create failed");
     }
 
-    channel_init(&jobs, 8);
+    channel_init(&jobs, cfg.max_jobs);
   }
 }
 
@@ -612,5 +618,7 @@ main(int argc, char const *argv[])
   while (!channel_readers(&reqs) || channel_backlog(&reqs))
     usleep(1000);
 
-  return handlers[0].rc;
+  stop(handlers[0].rc);
+
+  return EXIT_FAILURE;
 }
