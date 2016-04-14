@@ -19,78 +19,71 @@
 #include <arpa/inet.h>
 #include <sys/types.h>
 #include <pwd.h>
+#include <signal.h>
+
+#define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
+#define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
 
 #define ensure(x) for ( ; !(x) ; exit(EXIT_FAILURE) )
-#define errorf(...) ({ fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); })
+
+static pthread_key_t key_self;
+#define hself ((handler_t*)pthread_getspecific(key_self))
+#define wself ((worker_t*)pthread_getspecific(key_self))
+
+pthread_mutex_t stdout_mutex;
+pthread_mutex_t stderr_mutex;
+
+#define errorf(...) ({ \
+  pthread_mutex_lock(&stderr_mutex); \
+  fprintf(stderr, "%lx: ", (uint64_t)pthread_getspecific(key_self)); \
+  fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); \
+  pthread_mutex_unlock(&stderr_mutex); \
+})
 
 #define str_eq(a,b) (strcmp((a),(b)) == 0)
-
-#define CHANNEL_CELLS 10
 
 typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t cond_read;
   pthread_cond_t cond_write;
-  void *queue[CHANNEL_CELLS];
+  void **queue;
+  size_t cells;
   size_t backlog;
   size_t readers;
   size_t writers;
   int used;
 } channel_t;
 
-#define MAX_CHANNELS 1000
-channel_t channels[MAX_CHANNELS];
-int channel_count = 1;
-
-int
-channel_new ()
+void
+channel_init (channel_t *channel, size_t cells)
 {
-  int id = 0;
-
-  for (int i = 1; i < channel_count; i++)
-  {
-    channel_t *channel = &channels[i];
-
-    if (!channel->used)
-    {
-      id = i;
-      break;
-    }
-  }
-
-  if (!id)
-    id = channel_count++;
-
-  channel_t *channel = &channels[id];
-
   channel->used = 1;
   channel->backlog = 0;
   channel->readers = 0;
   channel->writers = 0;
+  channel->cells = cells;
+  channel->queue = calloc(channel->cells, sizeof(void*));
   pthread_mutex_init(&channel->mutex, NULL);
   pthread_cond_init(&channel->cond_read, NULL);
   pthread_cond_init(&channel->cond_write, NULL);
-
-  return id;
 }
 
 void
-channel_free (int id)
+channel_free (channel_t *channel)
 {
-  channel_t *channel = &channels[id];
   if (channel->used)
   {
     pthread_mutex_destroy(&channel->mutex);
     pthread_cond_destroy(&channel->cond_read);
     pthread_cond_destroy(&channel->cond_write);
+    free(channel->queue);
     channel->used = 0;
   }
 }
 
 size_t
-channel_backlog (int id)
+channel_backlog (channel_t *channel)
 {
-  channel_t *channel = &channels[id];
   pthread_mutex_lock(&channel->mutex);
   size_t backlog = channel->backlog;
   pthread_mutex_unlock(&channel->mutex);
@@ -98,9 +91,8 @@ channel_backlog (int id)
 }
 
 size_t
-channel_readers (int id)
+channel_readers (channel_t *channel)
 {
-  channel_t *channel = &channels[id];
   pthread_mutex_lock(&channel->mutex);
   size_t readers = channel->readers;
   pthread_mutex_unlock(&channel->mutex);
@@ -108,9 +100,8 @@ channel_readers (int id)
 }
 
 size_t
-channel_writers (int id)
+channel_writers (channel_t *channel)
 {
-  channel_t *channel = &channels[id];
   pthread_mutex_lock(&channel->mutex);
   size_t writers = channel->writers;
   pthread_mutex_unlock(&channel->mutex);
@@ -118,9 +109,8 @@ channel_writers (int id)
 }
 
 void*
-channel_read (int id)
+channel_read (channel_t *channel)
 {
-  channel_t *channel = &channels[id];
   pthread_mutex_lock(&channel->mutex);
   channel->readers++;
 
@@ -131,7 +121,7 @@ channel_read (int id)
   }
 
   void *msg = channel->queue[0];
-  memmove(&channel->queue[0], &channel->queue[1], sizeof(void*) * (CHANNEL_CELLS-1));
+  memmove(&channel->queue[0], &channel->queue[1], sizeof(void*) * (channel->cells-1));
   channel->backlog--;
 
   channel->readers--;
@@ -140,13 +130,12 @@ channel_read (int id)
 }
 
 void
-channel_write (int id, void *msg)
+channel_write (channel_t *channel, void *msg)
 {
-  channel_t *channel = &channels[id];
   pthread_mutex_lock(&channel->mutex);
   channel->writers++;
 
-  while (channel->backlog == CHANNEL_CELLS-1)
+  while (channel->backlog == channel->cells-1)
     pthread_cond_wait(&channel->cond_write, &channel->mutex);
 
   channel->queue[channel->backlog++] = msg;
@@ -158,10 +147,11 @@ channel_write (int id, void *msg)
 
 typedef struct {
   int tcp_port;
+  int tcp_backlog;
   size_t max_workers;
   const char *worker_path;
-  size_t max_requests;
-  const char *request_path;
+  size_t max_handlers;
+  const char *handler_path;
   const char *setuid_name;
 } config_t;
 
@@ -174,7 +164,7 @@ typedef struct {
   int rc;
   pthread_t thread;
   lua_State *lua;
-  int result;
+  channel_t *result;
 } worker_t;
 
 worker_t *workers;
@@ -188,21 +178,21 @@ typedef struct {
   FILE *fio;
   pthread_t thread;
   lua_State *lua;
-  int results;
-} request_t;
+  channel_t results;
+} handler_t;
 
-request_t *requests;
+handler_t *handlers;
 
 typedef struct {
   char *payload;
-  int result;
+  channel_t *result;
 } message_t;
 
-static pthread_key_t key_self;
-#define rself ((request_t*)pthread_getspecific(key_self))
-#define wself ((worker_t*)pthread_getspecific(key_self))
+typedef struct {
+  int io;
+} request_t;
 
-int jobs;
+channel_t jobs, reqs;
 
 const char*
 lua_popstring (lua_State *lua)
@@ -215,7 +205,7 @@ lua_popstring (lua_State *lua)
 int
 job_accept (lua_State *lua)
 {
-  message_t *message = channel_read(jobs);
+  message_t *message = channel_read(&jobs);
   lua_pushstring(lua, message->payload);
   wself->result = message->result;
   free(message->payload);
@@ -234,18 +224,24 @@ job_respond (lua_State *lua)
 int
 job_submit (lua_State *lua)
 {
+  ensure(cfg.worker_path)
+    errorf("no workers");
+
   message_t *message = malloc(sizeof(message_t));
-  message->result = rself->results;
+  message->result = &hself->results;
   char *payload = (char*)lua_popstring(lua);
   message->payload = strdup(payload);
-  channel_write(jobs, message);
+  channel_write(&jobs, message);
   return 0;
 }
 
 int
-job_receive (lua_State *lua)
+job_collect (lua_State *lua)
 {
-  char *payload = channel_read(rself->results);
+  ensure(cfg.worker_path)
+    errorf("no workers");
+
+  char *payload = channel_read(&hself->results);
   lua_pushstring(lua, payload);
   free(payload);
   return 1;
@@ -254,11 +250,11 @@ job_receive (lua_State *lua)
 int
 close_io (lua_State *lua)
 {
-  if (rself->fio)
+  if (hself->fio)
   {
-    fclose(rself->fio);
-    rself->fio = NULL;
-    rself->io = 0;
+    fclose(hself->fio);
+    hself->fio = NULL;
+    hself->io = 0;
   }
   return 0;
 }
@@ -272,6 +268,8 @@ main_worker (void *ptr)
   ensure(pthread_setspecific(key_self, worker) == 0)
     errorf("pthread_setspecific failed");
 
+  errorf("worker");
+
   ensure((worker->lua = luaL_newstate()))
     errorf("luaL_newstate failed");
 
@@ -279,10 +277,17 @@ main_worker (void *ptr)
 
   worker->rc = EXIT_SUCCESS;
 
+  lua_createtable(worker->lua, 0, 0);
+
+  lua_pushstring(worker->lua, "accept");
   lua_pushcfunction(worker->lua, job_accept);
-  lua_setglobal(worker->lua, "job_accept");
+  lua_settable(worker->lua, -3);
+
+  lua_pushstring(worker->lua, "respond");
   lua_pushcfunction(worker->lua, job_respond);
-  lua_setglobal(worker->lua, "job_respond");
+  lua_settable(worker->lua, -3);
+
+  lua_setglobal(worker->lua, "job");
 
   if (luaL_dofile(worker->lua, cfg.worker_path) != 0)
   {
@@ -299,78 +304,126 @@ main_worker (void *ptr)
 }
 
 void*
-main_request (void *ptr)
+main_handler (void *ptr)
 {
-  request_t *request = ptr;
-  pthread_mutex_lock(&request->mutex);
+  handler_t *handler = ptr;
+  pthread_mutex_lock(&handler->mutex);
 
-  ensure(pthread_setspecific(key_self, request) == 0)
+  ensure(pthread_setspecific(key_self, handler) == 0)
     errorf("pthread_setspecific failed");
 
-  ensure((request->lua = luaL_newstate()))
-    errorf("luaL_newstate failed");
+  errorf("handler");
 
-  luaL_openlibs(request->lua);
+  channel_init(&handler->results, 10);
 
-  request->fio = fdopen(request->io, "r+");
+  request_t *request = NULL;
 
-  ensure(request->fio)
-    errorf("fdopen failed");
-
-  request->results = channel_new();
-
-#ifdef LUA51
-  FILE **fio = lua_newuserdata(request->lua, sizeof(FILE*));
-  *fio = request->fio;
-  luaL_getmetatable(request->lua, LUA_FILEHANDLE);
-  lua_setmetatable(request->lua, -2);
-  lua_createtable(request->lua, 0, 1);
-  lua_pushcfunction(request->lua, close_io);
-  lua_setfield(request->lua, -2, "__close");
-  lua_setfenv(request->lua, -2);
-  lua_setglobal(request->lua, "sock");
-#endif
-
-#ifdef LUA52
-  luaL_Stream *s = lua_newuserdata(request->lua, sizeof(luaL_Stream));
-  s->f = request->fio;
-  s->closef = close_io;
-  luaL_setmetatable(request->lua, LUA_FILEHANDLE);
-  lua_setglobal(request->lua, "sock");
-#endif
-
-  request->rc = EXIT_SUCCESS;
-
-  lua_pushcfunction(request->lua, job_submit);
-  lua_setglobal(request->lua, "job_submit");
-  lua_pushcfunction(request->lua, job_receive);
-  lua_setglobal(request->lua, "job_receive");
-
-  if (luaL_dofile(request->lua, cfg.request_path) != 0)
+  while ((request = channel_read(&reqs)))
   {
-    errorf("lua error: %s", lua_tostring(request->lua, -1));
-    request->rc = EXIT_FAILURE;
+    handler->io = request->io;
+    free(request);
+
+    ensure((handler->lua = luaL_newstate()))
+      errorf("luaL_newstate failed");
+
+    luaL_openlibs(handler->lua);
+
+    handler->fio = fdopen(handler->io, "r+");
+
+    ensure(handler->fio)
+      errorf("fdopen failed");
+
+  #ifdef LUA51
+    FILE **fio = lua_newuserdata(handler->lua, sizeof(FILE*));
+    *fio = handler->fio;
+    luaL_getmetatable(handler->lua, LUA_FILEHANDLE);
+    lua_setmetatable(handler->lua, -2);
+    lua_createtable(handler->lua, 0, 1);
+    lua_pushcfunction(handler->lua, close_io);
+    lua_setfield(handler->lua, -2, "__close");
+    lua_setfenv(handler->lua, -2);
+    lua_setglobal(handler->lua, "sock");
+  #endif
+
+  #ifdef LUA52
+    luaL_Stream *s = lua_newuserdata(handler->lua, sizeof(luaL_Stream));
+    s->f = handler->fio;
+    s->closef = close_io;
+    luaL_setmetatable(handler->lua, LUA_FILEHANDLE);
+    lua_setglobal(handler->lua, "sock");
+  #endif
+
+    handler->rc = EXIT_SUCCESS;
+
+    lua_createtable(handler->lua, 0, 0);
+
+    lua_pushstring(handler->lua, "submit");
+    lua_pushcfunction(handler->lua, job_submit);
+    lua_settable(handler->lua, -3);
+
+    lua_pushstring(handler->lua, "collect");
+    lua_pushcfunction(handler->lua, job_collect);
+    lua_settable(handler->lua, -3);
+
+    lua_setglobal(handler->lua, "job");
+
+    if (luaL_dofile(handler->lua, cfg.handler_path) != 0)
+    {
+      errorf("lua error: %s", lua_tostring(handler->lua, -1));
+      handler->rc = EXIT_FAILURE;
+    }
+
+    close_io(handler->lua);
+    lua_close(handler->lua);
   }
 
-  close_io(request->lua);
-  lua_close(request->lua);
-  channel_free(request->results);
+  channel_free(&handler->results);
 
-  request->done = 1;
-  pthread_mutex_unlock(&request->mutex);
+  handler->done = 1;
+  pthread_mutex_unlock(&handler->mutex);
 
   return NULL;
 }
 
-int
-main(int argc, char const *argv[])
+void
+stop()
 {
-  cfg.tcp_port = 80;
-  cfg.max_workers = 10;
-  cfg.max_requests = 100;
-  cfg.request_path = NULL;
-  cfg.worker_path = NULL;
-  cfg.setuid_name = NULL;
+  exit(EXIT_SUCCESS);
+}
+
+void
+sig_int(int sig)
+{
+  errorf("SIGINT");
+  stop();
+}
+
+void
+sig_term(int sig)
+{
+  errorf("SIGTERM");
+  stop();
+}
+
+void
+start(int argc, const char *argv[])
+{
+  long cores = sysconf(_SC_NPROCESSORS_ONLN);
+
+  cfg.tcp_port     = 80;
+  cfg.tcp_backlog  = 32;
+  cfg.max_workers  = cores;
+  cfg.max_handlers = cores*2;
+  cfg.handler_path = NULL;
+  cfg.worker_path  = NULL;
+  cfg.setuid_name  = NULL;
+
+  signal(SIGINT,  sig_int);
+  signal(SIGTERM, sig_term);
+  signal(SIGPIPE, SIG_IGN);
+
+  ensure(pthread_mutex_init(&stdout_mutex, NULL) == 0);
+  ensure(pthread_mutex_init(&stderr_mutex, NULL) == 0);
 
   for (int argi = 1; argi < argc; argi++)
   {
@@ -398,51 +451,60 @@ main(int argc, char const *argv[])
       cfg.max_workers = strtol(argv[++argi], NULL, 0);
       continue;
     }
-    if (str_eq(argv[argi], "-r") || str_eq(argv[argi], "--request"))
+    if (str_eq(argv[argi], "-h") || str_eq(argv[argi], "--handler"))
     {
-      ensure(argi < argc-1) errorf("expected (-r|--request) <value>");
-      cfg.request_path = argv[++argi];
+      ensure(argi < argc-1) errorf("expected (-h|--handler) <value>");
+      cfg.handler_path = argv[++argi];
       continue;
     }
-    if (str_eq(argv[argi], "-mr") || str_eq(argv[argi], "--max-requests"))
+    if (str_eq(argv[argi], "-mr") || str_eq(argv[argi], "--max-handlers"))
     {
-      ensure(argi < argc-1) errorf("expected (-mr|--max-requests) <value>");
-      cfg.max_requests = strtol(argv[++argi], NULL, 0);
+      ensure(argi < argc-1) errorf("expected (-mr|--max-handlers) <value>");
+      cfg.max_handlers = strtol(argv[++argi], NULL, 0);
       continue;
     }
 
-    cfg.request_path = argv[argi];
+    cfg.handler_path = argv[argi];
   }
 
-  ensure(cfg.request_path)
+  ensure(cfg.handler_path)
     errorf("expected script");
 
   ensure(pthread_key_create(&key_self, NULL) == 0)
     errorf("pthread_key_create failed");
 
-  size_t requests_bytes = sizeof(request_t) * cfg.max_requests;
+  size_t handlers_bytes = sizeof(handler_t) * cfg.max_handlers;
 
-  ensure(requests = malloc(requests_bytes))
-    errorf("malloc failed %lu", requests_bytes);
+  ensure(handlers = malloc(handlers_bytes))
+    errorf("malloc failed %lu", handlers_bytes);
 
-  memset(requests, 0, requests_bytes);
+  memset(handlers, 0, handlers_bytes);
 
-  for (size_t ri = 0; ri < cfg.max_requests; ri++)
+  for (size_t ri = 0; ri < cfg.max_handlers; ri++)
   {
-    ensure(pthread_mutex_init(&requests[ri].mutex, NULL) == 0)
+    ensure(pthread_mutex_init(&handlers[ri].mutex, NULL) == 0)
       errorf("pthread_mutex_init failed");
+
+    handler_t *handler = &handlers[ri];
+
+    handler->active = 1;
+
+    ensure(pthread_create(&handler->thread, NULL, main_handler, handler) == 0)
+      errorf("pthread_create failed");
   }
+
+  channel_init(&reqs, 100);
 
   if (cfg.worker_path)
   {
-    size_t workers_bytes = sizeof(request_t) * cfg.max_workers;
+    size_t workers_bytes = sizeof(handler_t) * cfg.max_workers;
 
     ensure(workers = malloc(workers_bytes))
       errorf("malloc failed %lu", workers_bytes);
 
     memset(workers, 0, workers_bytes);
 
-    for (size_t wi = 0; wi < cfg.max_requests; wi++)
+    for (size_t wi = 0; wi < cfg.max_workers; wi++)
     {
       ensure(pthread_mutex_init(&workers[wi].mutex, NULL) == 0)
         errorf("pthread_mutex_init failed");
@@ -455,8 +517,14 @@ main(int argc, char const *argv[])
         errorf("pthread_create failed");
     }
 
-    jobs = channel_new(0);
+    channel_init(&jobs, 100);
   }
+}
+
+int
+main(int argc, char const *argv[])
+{
+  start(argc, argv);
 
   int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -493,54 +561,11 @@ main(int argc, char const *argv[])
 
   while ((fd = accept(sock_fd, NULL, NULL)) && fd >= 0)
   {
-    request_t *request = NULL;
-
-    while (!request)
-    {
-      for (int reqi = 0; !request && reqi < cfg.max_requests; reqi++)
-      {
-        request_t *req = &requests[reqi];
-
-        if (pthread_mutex_trylock(&req->mutex) != 0)
-          continue;
-
-        if (req->active && req->done)
-        {
-          ensure(pthread_join(req->thread, NULL) == 0)
-            errorf("pthread_join failed");
-
-          request = req;
-        }
-        else
-        if (!req->active)
-        {
-          request = req;
-        }
-        else
-        {
-          pthread_mutex_unlock(&req->mutex);
-        }
-      }
-
-      if (!request)
-      {
-        errorf("hit max_requests");
-        usleep(10000);
-      }
-    }
-
-    memset(request, 0, sizeof(request_t));
-
+    request_t *request = malloc(sizeof(request_t));
     request->io = fd;
-    request->active = 1;
 
-    ensure(pthread_create(&request->thread, NULL, main_request, request) == 0)
-      errorf("pthread_create failed");
-
-    pthread_mutex_unlock(&request->mutex);
+    channel_write(&reqs, request);
   }
 
-  close(sock_fd);
-
-  return EXIT_SUCCESS;
+  return EXIT_FAILURE;
 }
