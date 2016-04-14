@@ -484,6 +484,9 @@ start(int argc, const char *argv[])
       continue;
     }
 
+    ensure(argv[argi][0] != '-')
+      errorf("huh? %s", argv[argi]);
+
     if (!cfg.handler_code)
     {
       cfg.handler_code = argv[argi];
