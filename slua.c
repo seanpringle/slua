@@ -222,7 +222,7 @@ int
 job_accept (lua_State *lua)
 {
   message_t *message = channel_read(&jobs);
-  lua_pushstring(lua, message->payload);
+  if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
   wself->result = message->result;
   free(message->payload);
   free(message);
@@ -232,8 +232,8 @@ job_accept (lua_State *lua)
 int
 job_result (lua_State *lua)
 {
-  char *payload = (char*)lua_popstring(lua);
-  channel_write(wself->result, strdup(payload));
+  channel_write(wself->result,
+    lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL);
   return 0;
 }
 
@@ -245,8 +245,8 @@ job_submit (lua_State *lua)
 
   message_t *message = malloc(sizeof(message_t));
   message->result = &hself->results;
-  char *payload = (char*)lua_popstring(lua);
-  message->payload = strdup(payload);
+  message->payload = lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL;
+
   channel_write(&jobs, message);
   return 0;
 }
