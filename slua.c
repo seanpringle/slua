@@ -258,7 +258,7 @@ job_collect (lua_State *lua)
     errorf("no workers");
 
   char *payload = channel_read(&hself->results);
-  lua_pushstring(lua, payload);
+  if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
   free(payload);
   return 1;
 }
