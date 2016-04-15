@@ -24,6 +24,7 @@
 #include <dirent.h>
 #include <pwd.h>
 #include <grp.h>
+#include <math.h>
 
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
 #define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
@@ -51,6 +52,26 @@ pthread_mutex_t stderr_mutex;
 })
 
 #define str_eq(a,b) (strcmp((a),(b)) == 0)
+
+char*
+strf (char *pattern, ...)
+{
+  char *result = NULL;
+  va_list args;
+  char buffer[8];
+
+  va_start(args, pattern);
+  int len = vsnprintf(buffer, sizeof(buffer), pattern, args);
+  va_end(args);
+
+  if (len > -1 && (result = malloc(len+1)) && result)
+  {
+    va_start(args, pattern);
+    vsnprintf(result, len+1, pattern, args);
+    va_end(args);
+  }
+  return result;
+}
 
 typedef struct {
   pthread_mutex_t mutex;
@@ -330,13 +351,309 @@ posix_stat (lua_State *lua)
   return 1;
 }
 
+char*
+str_quote (char *str)
+{
+  char *res = malloc(strlen(str)*2+3);
+  char *rp = res, *sp = str;
+
+  *rp++ = '"';
+
+  while (sp && *sp)
+  {
+    int c = *sp++;
+    if (c == '"') { *rp++ = '\\'; }
+    else if (c == '\\') { *rp++ = '\\'; }
+    else if (c == '\a') { *rp++ = '\\'; c = 'a'; }
+    else if (c == '\b') { *rp++ = '\\'; c = 'b'; }
+    else if (c == '\f') { *rp++ = '\\'; c = 'f'; }
+    else if (c == '\n') { *rp++ = '\\'; c = 'n'; }
+    else if (c == '\r') { *rp++ = '\\'; c = 'r'; }
+    else if (c == '\t') { *rp++ = '\\'; c = 't'; }
+    else if (c == '\v') { *rp++ = '\\'; c = 'v'; }
+    *rp++ = c;
+  }
+
+  *rp++ = '"';
+  *rp = 0;
+  return res;
+}
+
+char*
+str_unquote (char *str, char **err)
+{
+  char *res = malloc(strlen(str)+1);
+  char *rp = res, *sp = str;
+
+  sp++;
+
+  while (sp && *sp)
+  {
+    int c = *sp++;
+    if (c == '"') break;
+
+    if (c == '\\')
+    {
+           if (*sp == 'a') c = '\a';
+      else if (*sp == 'b') c = '\b';
+      else if (*sp == 'f') c = '\f';
+      else if (*sp == 'n') c = '\n';
+      else if (*sp == 'r') c = '\r';
+      else if (*sp == 't') c = '\t';
+      else if (*sp == 'v') c = '\v';
+      else c = *sp++;
+    }
+    *rp++ = c;
+  }
+  *rp = 0;
+
+  if (err)
+    *err = sp;
+
+  return res;
+}
+
+int
+json_encode (lua_State *lua)
+{
+  // check for array
+  int table_length = 0;
+  int has_strings = 0;
+  int has_numbers = 0;
+  lua_pushnil(lua);
+  while (lua_next(lua, -2))
+  {
+    if (lua_type(lua, -2) == LUA_TNUMBER) has_numbers++;
+    if (lua_type(lua, -2) == LUA_TSTRING) has_strings++;
+    lua_pop(lua, 1);
+    table_length++;
+  }
+
+  if (!table_length)
+  {
+    lua_pop(lua, 1);
+    lua_pushstring(lua, "[]");
+    return 1;
+  }
+
+  if (has_strings && has_numbers) has_numbers = 0;
+
+  int is_hash = has_strings;
+
+  int length = 0, limit = 1024;
+  char *json = malloc(limit);
+
+  json[length++] = is_hash ? '{': '[';
+
+  lua_pushnil(lua);
+  while (lua_next(lua, -2))
+  {
+    if (lua_type(lua, -2) == LUA_TSTRING || lua_type(lua, -2) == LUA_TNUMBER)
+    {
+      char *key = lua_type(lua, -2) == LUA_TSTRING
+        ? str_quote((char*)lua_tostring(lua, -2)) : NULL;
+
+      if (!key)
+      {
+        double num = lua_tonumber(lua, -2);
+        key = strf("\"%ld\"", (int64_t)num);
+      }
+
+      char *val = NULL;
+
+      switch (lua_type(lua, -1))
+      {
+        case LUA_TNIL:
+          val = strdup("null");
+          break;
+
+        case LUA_TBOOLEAN:
+          val = strdup(lua_toboolean(lua, -1) ? "true": "false");
+          break;
+
+        case LUA_TNUMBER:
+          val = strdup((char*)lua_tostring(lua, -1));
+          break;
+
+        case LUA_TSTRING:
+          val = str_quote((char*)lua_tostring(lua, -1));
+          break;
+
+        case LUA_TTABLE:
+          json_encode(lua);
+          val = strdup((char*)lua_tostring(lua, -1));
+          break;
+      }
+
+      if (val)
+      {
+        limit += strlen(key) + strlen(val) + 3;
+        json = realloc(json, limit);
+
+        if (is_hash)
+        {
+          length += snprintf(json+length, limit-length, "%s:%s,", key, val);
+        }
+        else
+        {
+          length += snprintf(json+length, limit-length, "%s,", val);
+        }
+      }
+
+      free(key);
+      free(val);
+    }
+    lua_pop(lua, 1);
+  }
+
+  json[length-1] = is_hash ? '}': ']';
+  json[length] = 0;
+
+  lua_pop(lua, 1);
+  lua_pushstring(lua, json);
+  free(json);
+
+  return 1;
+}
+
+char*
+json_decode_step (lua_State *lua, char *json, int mode)
+{
+  lua_createtable(lua, 0, 0);
+  int table_size = 0;
+
+  int pushed = 0;
+  char *str;
+  double num;
+
+  while (json && *json && strchr(", \t\r\n", *json)) json++;
+
+  char *last = NULL;
+
+  while (json && *json)
+  {
+    int c = *json++;
+
+    if (c == ']' || c == '}' || last == json)
+    {
+      if (pushed)
+        lua_pop(lua, pushed);
+      break;
+    }
+
+    last = json;
+
+    switch (c)
+    {
+      case '[':
+        json = json_decode_step(lua, json, 1);
+        pushed++;
+        break;
+
+      case '{':
+        json = json_decode_step(lua, json, 2);
+        pushed++;
+        break;
+
+      case '"':
+        str = str_unquote(json-1, &json);
+        lua_pushstring(lua, str);
+        free(str);
+        pushed++;
+        break;
+
+      case 'n':
+        lua_pushnil(lua);
+        pushed++;
+        break;
+
+      default:
+        num = strtod(json-1, &json);
+        lua_pushnumber(lua, num);
+        pushed++;
+        break;
+    }
+
+    while (json && *json && strchr(", \t\r\n", *json)) json++;
+
+    if (*json == ':')
+    {
+      json++;
+      while (json && *json && strchr(", \t\r\n", *json)) json++;
+
+      if (mode == 1 && pushed)
+      {
+        lua_pop(lua, pushed);
+        pushed = 0;
+      }
+      continue;
+    }
+
+    if (mode == 1 && pushed == 1)
+    {
+      lua_pushnumber(lua, ++table_size);
+      lua_insert(lua, -2);
+      lua_settable(lua, -3);
+      pushed = 0;
+    }
+    else
+    if (mode == 2 && pushed == 2)
+    {
+      lua_settable(lua, -3);
+      pushed = 0;
+    }
+    else
+    {
+      errorf("unexpected state, mode: %d, pushed: %d", mode, pushed);
+      break;
+    }
+  }
+
+  while (json && *json && strchr(", \t\r\n", *json)) json++;
+  return json;
+}
+
+int
+json_decode (lua_State *lua)
+{
+  char *json = strdup((char*)lua_popstring(lua));
+
+  if (!json || !strchr("{[", *json))
+  {
+    lua_pushnil(lua);
+    return 1;
+  }
+
+  int c = *json;
+  json_decode_step(lua, json+1, c == '{' ? 2: 1);
+  free(json);
+  return 1;
+}
+
 void
 lua_functions(lua_State *lua)
 {
+  lua_getglobal(lua, "io");
+
+  lua_pushstring(lua, "stat");
   lua_pushcfunction(lua, posix_stat);
-  lua_setglobal(lua, "stat");
+  lua_settable(lua, -3);
+  lua_pushstring(lua, "ls");
   lua_pushcfunction(lua, posix_ls);
-  lua_setglobal(lua, "ls");
+  lua_settable(lua, -3);
+
+  lua_pop(lua, 1);
+
+  lua_getglobal(lua, "table");
+
+  lua_pushstring(lua, "json_encode");
+  lua_pushcfunction(lua, json_encode);
+  lua_settable(lua, -3);
+  lua_pushstring(lua, "json_decode");
+  lua_pushcfunction(lua, json_decode);
+  lua_settable(lua, -3);
+
+  lua_pop(lua, 1);
 }
 
 int
