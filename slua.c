@@ -161,15 +161,17 @@ channel_read (channel_t *channel)
   while (channel->backlog == 0)
     pthread_cond_wait(&channel->cond_read, &channel->mutex);
 
+  channel->backlog--;
+
   channel_node_t *node = channel->list;
   channel->list = node->next;
+
   void *msg = node->payload;
 
   if (node == channel->last)
     channel->last = NULL;
 
   free(node);
-  channel->backlog--;
 
   if (channel->writers)
     pthread_cond_signal(&channel->cond_write);
@@ -201,6 +203,7 @@ channel_write (channel_t *channel, void *msg)
   }
   else
   {
+    channel->last->next = node;
     channel->last = node;
   }
 
