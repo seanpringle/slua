@@ -775,6 +775,32 @@ results_backlog (lua_State *lua)
   return 1;
 }
 
+int
+safe_print (lua_State *lua)
+{
+  ensure(pthread_mutex_lock(&stdout_mutex) == 0);
+  int args = lua_gettop(lua);
+  for (int i = 0; i < args; i++)
+    printf("%s", lua_tostring(lua, i+1));
+  printf("\n");
+  lua_pop(lua, args);
+  ensure(pthread_mutex_unlock(&stdout_mutex) == 0);
+  return 0;
+}
+
+int
+safe_error (lua_State *lua)
+{
+  ensure(pthread_mutex_lock(&stderr_mutex) == 0);
+  int args = lua_gettop(lua);
+  for (int i = 0; i < args; i++)
+    fprintf(stderr, "%s", lua_tostring(lua, i+1));
+  fprintf(stderr, "\n");
+  lua_pop(lua, args);
+  ensure(pthread_mutex_unlock(&stderr_mutex) == 0);
+  return 0;
+}
+
 void
 lua_functions(lua_State *lua)
 {
@@ -799,6 +825,11 @@ lua_functions(lua_State *lua)
   lua_settable(lua, -3);
 
   lua_pop(lua, 1);
+
+  lua_pushcfunction(lua, safe_print);
+  lua_setglobal(lua, "print");
+  lua_pushcfunction(lua, safe_error);
+  lua_setglobal(lua, "error");
 }
 
 int
