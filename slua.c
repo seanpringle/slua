@@ -187,7 +187,7 @@ channel_write (channel_t *channel, void *msg)
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
 
-  while (channel->backlog == channel->limit)
+  while (channel->limit > 0 && channel->backlog == channel->limit)
     pthread_cond_wait(&channel->cond_write, &channel->mutex);
 
   channel->backlog++;
@@ -923,8 +923,8 @@ start(int argc, const char *argv[])
   cfg.worker_path  = NULL;
   cfg.worker_code  = NULL;
   cfg.setuid_name  = NULL;
-  cfg.max_jobs     = 32;
-  cfg.max_results  = 32;
+  cfg.max_jobs     = 0;
+  cfg.max_results  = 0;
 
   signal(SIGINT,  sig_int);
   signal(SIGTERM, sig_term);
