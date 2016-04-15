@@ -403,7 +403,7 @@ posix_stat (lua_State *lua)
       char *target = NULL;
 
       int limit = 1024;
-      char *buffer = malloc(limit);
+      char *buffer = malloc(limit+1);
 
       while (buffer && limit < 1024*1024)
       {
@@ -416,12 +416,13 @@ posix_stat (lua_State *lua)
         }
         if (bytes < limit)
         {
+          buffer[bytes] = 0;
           target = buffer;
           buffer = NULL;
           break;
         }
         limit += 1024;
-        buffer = realloc(buffer, limit);
+        buffer = realloc(buffer, limit+1);
       }
 
       free(buffer);
