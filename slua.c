@@ -73,12 +73,18 @@ strf (char *pattern, ...)
   return result;
 }
 
+typedef struct _channel_node_t {
+  void *payload;
+  struct _channel_node_t *next;
+} channel_node_t;
+
 typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t cond_read;
   pthread_cond_t cond_write;
-  void **queue;
-  size_t cells;
+  channel_node_t *list;
+  channel_node_t *last;
+  size_t limit;
   size_t backlog;
   size_t readers;
   size_t writers;
@@ -86,14 +92,15 @@ typedef struct {
 } channel_t;
 
 void
-channel_init (channel_t *channel, size_t cells)
+channel_init (channel_t *channel, size_t limit)
 {
   channel->used = 1;
   channel->backlog = 0;
   channel->readers = 0;
   channel->writers = 0;
-  channel->cells = cells;
-  channel->queue = calloc(channel->cells, sizeof(void*));
+  channel->limit = limit;
+  channel->list = NULL;
+  channel->last = NULL;
   ensure(pthread_mutex_init(&channel->mutex, NULL) == 0);
   ensure(pthread_cond_init(&channel->cond_read, NULL) == 0);
   ensure(pthread_cond_init(&channel->cond_write, NULL) == 0);
@@ -104,10 +111,16 @@ channel_free (channel_t *channel)
 {
   if (channel->used)
   {
+    while (channel->list)
+    {
+      channel_node_t *node = channel->list;
+      channel->list = node->next;
+      free(node);
+    }
     pthread_mutex_destroy(&channel->mutex);
     pthread_cond_destroy(&channel->cond_read);
     pthread_cond_destroy(&channel->cond_write);
-    free(channel->queue);
+    free(channel->list);
     channel->used = 0;
   }
 }
@@ -148,8 +161,14 @@ channel_read (channel_t *channel)
   while (channel->backlog == 0)
     pthread_cond_wait(&channel->cond_read, &channel->mutex);
 
-  void *msg = channel->queue[0];
-  memmove(&channel->queue[0], &channel->queue[1], sizeof(void*) * (channel->cells-1));
+  channel_node_t *node = channel->list;
+  channel->list = node->next;
+  void *msg = node->payload;
+
+  if (node == channel->last)
+    channel->last = NULL;
+
+  free(node);
   channel->backlog--;
 
   if (channel->writers)
@@ -166,10 +185,24 @@ channel_write (channel_t *channel, void *msg)
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
 
-  while (channel->backlog == channel->cells)
+  while (channel->backlog == channel->limit)
     pthread_cond_wait(&channel->cond_write, &channel->mutex);
 
-  channel->queue[channel->backlog++] = msg;
+  channel->backlog++;
+
+  channel_node_t *node = malloc(sizeof(channel_node_t));
+  node->payload = msg;
+  node->next = NULL;
+
+  if (!channel->list)
+  {
+    channel->list = node;
+    channel->last = node;
+  }
+  else
+  {
+    channel->last = node;
+  }
 
   if (channel->readers)
     pthread_cond_signal(&channel->cond_read);
@@ -631,7 +664,7 @@ json_decode (lua_State *lua)
 }
 
 int
-job_accept (lua_State *lua)
+work_accept (lua_State *lua)
 {
   message_t *message = channel_read(&jobs);
   if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
@@ -642,7 +675,7 @@ job_accept (lua_State *lua)
 }
 
 int
-job_result (lua_State *lua)
+work_result (lua_State *lua)
 {
   channel_write(wself->result,
     lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL);
@@ -650,7 +683,7 @@ job_result (lua_State *lua)
 }
 
 int
-job_submit (lua_State *lua)
+work_submit (lua_State *lua)
 {
   ensure(cfg.worker_path)
     errorf("no workers");
@@ -664,7 +697,7 @@ job_submit (lua_State *lua)
 }
 
 int
-job_collect (lua_State *lua)
+work_collect (lua_State *lua)
 {
   ensure(cfg.worker_path)
     errorf("no workers");
@@ -739,11 +772,11 @@ main_worker (void *ptr)
   lua_createtable(worker->lua, 0, 0);
 
   lua_pushstring(worker->lua, "accept");
-  lua_pushcfunction(worker->lua, job_accept);
+  lua_pushcfunction(worker->lua, work_accept);
   lua_settable(worker->lua, -3);
 
   lua_pushstring(worker->lua, "result");
-  lua_pushcfunction(worker->lua, job_result);
+  lua_pushcfunction(worker->lua, work_result);
   lua_settable(worker->lua, -3);
 
   lua_setglobal(worker->lua, "work");
@@ -818,11 +851,11 @@ main_handler (void *ptr)
     lua_createtable(handler->lua, 0, 0);
 
     lua_pushstring(handler->lua, "submit");
-    lua_pushcfunction(handler->lua, job_submit);
+    lua_pushcfunction(handler->lua, work_submit);
     lua_settable(handler->lua, -3);
 
     lua_pushstring(handler->lua, "collect");
-    lua_pushcfunction(handler->lua, job_collect);
+    lua_pushcfunction(handler->lua, work_collect);
     lua_settable(handler->lua, -3);
 
     lua_pushstring(handler->lua, "done");
