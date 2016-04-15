@@ -396,7 +396,7 @@ posix_stat (lua_State *lua)
     {
       int sok = stat(path, &sst) == 0;
 
-      lua_pushstring(lua, "link_ok");
+      lua_pushstring(lua, "intact");
       lua_pushboolean(lua, sok);
       lua_settable(lua, -3);
 
@@ -427,7 +427,7 @@ posix_stat (lua_State *lua)
 
       free(buffer);
 
-      lua_pushstring(lua, "link_target");
+      lua_pushstring(lua, "target");
       lua_pushstring(lua, target ? target: "");
       lua_settable(lua, -3);
 
