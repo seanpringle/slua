@@ -825,7 +825,7 @@ main_handler (void *ptr)
     lua_pushcfunction(handler->lua, job_collect);
     lua_settable(handler->lua, -3);
 
-    lua_pushstring(handler->lua, "results");
+    lua_pushstring(handler->lua, "completed");
     lua_pushcfunction(handler->lua, results_backlog);
     lua_settable(handler->lua, -3);
 
