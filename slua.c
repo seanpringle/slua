@@ -630,32 +630,6 @@ json_decode (lua_State *lua)
   return 1;
 }
 
-void
-lua_functions(lua_State *lua)
-{
-  lua_getglobal(lua, "io");
-
-  lua_pushstring(lua, "stat");
-  lua_pushcfunction(lua, posix_stat);
-  lua_settable(lua, -3);
-  lua_pushstring(lua, "ls");
-  lua_pushcfunction(lua, posix_ls);
-  lua_settable(lua, -3);
-
-  lua_pop(lua, 1);
-
-  lua_getglobal(lua, "table");
-
-  lua_pushstring(lua, "json_encode");
-  lua_pushcfunction(lua, json_encode);
-  lua_settable(lua, -3);
-  lua_pushstring(lua, "json_decode");
-  lua_pushcfunction(lua, json_decode);
-  lua_settable(lua, -3);
-
-  lua_pop(lua, 1);
-}
-
 int
 job_accept (lua_State *lua)
 {
@@ -699,6 +673,39 @@ job_collect (lua_State *lua)
   if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
   free(payload);
   return 1;
+}
+
+int
+results_backlog (lua_State *lua)
+{
+  lua_pushnumber(lua, channel_backlog(&hself->results));
+  return 1;
+}
+
+void
+lua_functions(lua_State *lua)
+{
+  lua_getglobal(lua, "io");
+
+  lua_pushstring(lua, "stat");
+  lua_pushcfunction(lua, posix_stat);
+  lua_settable(lua, -3);
+  lua_pushstring(lua, "ls");
+  lua_pushcfunction(lua, posix_ls);
+  lua_settable(lua, -3);
+
+  lua_pop(lua, 1);
+
+  lua_getglobal(lua, "table");
+
+  lua_pushstring(lua, "json_encode");
+  lua_pushcfunction(lua, json_encode);
+  lua_settable(lua, -3);
+  lua_pushstring(lua, "json_decode");
+  lua_pushcfunction(lua, json_decode);
+  lua_settable(lua, -3);
+
+  lua_pop(lua, 1);
 }
 
 int
@@ -816,6 +823,10 @@ main_handler (void *ptr)
 
     lua_pushstring(handler->lua, "collect");
     lua_pushcfunction(handler->lua, job_collect);
+    lua_settable(handler->lua, -3);
+
+    lua_pushstring(handler->lua, "results");
+    lua_pushcfunction(handler->lua, results_backlog);
     lua_settable(handler->lua, -3);
 
     lua_setglobal(handler->lua, "job");
