@@ -312,16 +312,19 @@ posix_stat (lua_State *lua)
 {
   char *path = (char*)lua_popstring(lua);
 
-  struct stat st;
-  int exists = stat(path, &st) == 0;
+  struct stat st, sst;
 
-  if (exists)
+  int lok = lstat(path, &st)  == 0;
+
+  if (lok)
   {
     char mode[11];
     strcpy(mode, "----------");
     int i = 0;
 
-    if (S_ISDIR(st.st_mode))  mode[i] = 'd'; i++;
+    if (S_ISDIR(st.st_mode))  mode[0] = 'd'; i = 1;
+    if (S_ISLNK(st.st_mode))  mode[0] = 'l'; i = 1;
+
     if (st.st_mode & S_IRUSR) mode[i] = 'r'; i++;
     if (st.st_mode & S_IWUSR) mode[i] = 'w'; i++;
     if (st.st_mode & S_IXUSR) mode[i] = 'x'; i++;
@@ -345,6 +348,18 @@ posix_stat (lua_State *lua)
     int prs = getpwuid_r(st.st_uid, pwd, pbuff, psize, &pwd);
 
     lua_createtable(lua, 0, 0);
+
+    lua_pushstring(lua, "type");
+
+         if (S_ISDIR(st.st_mode)) lua_pushstring(lua, "directory");
+    else if (S_ISLNK(st.st_mode)) lua_pushstring(lua, "link");
+    else if (S_ISCHR(st.st_mode)) lua_pushstring(lua, "cdev");
+    else if (S_ISBLK(st.st_mode)) lua_pushstring(lua, "bdev");
+    else if (S_ISFIFO(st.st_mode)) lua_pushstring(lua, "fifo");
+    else if (S_ISREG(st.st_mode)) lua_pushstring(lua, "file");
+    else lua_pushstring(lua, "unknown");
+
+    lua_settable(lua, -3);
 
     lua_pushstring(lua, "size");
     lua_pushnumber(lua, st.st_size);
@@ -376,6 +391,47 @@ posix_stat (lua_State *lua)
     lua_pushstring(lua, "atime");
     lua_pushnumber(lua, (long long)st.st_atim.tv_sec);
     lua_settable(lua, -3);
+
+    if (S_ISLNK(st.st_mode))
+    {
+      int sok = stat(path, &sst) == 0;
+
+      lua_pushstring(lua, "link_ok");
+      lua_pushboolean(lua, sok);
+      lua_settable(lua, -3);
+
+      char *target = NULL;
+
+      int limit = 1024;
+      char *buffer = malloc(limit);
+
+      while (buffer && limit < 1024*1024)
+      {
+        int bytes = readlink(path, buffer, limit);
+        if (bytes < 0)
+        {
+          free(buffer);
+          buffer = NULL;
+          break;
+        }
+        if (bytes < limit)
+        {
+          target = buffer;
+          buffer = NULL;
+          break;
+        }
+        limit += 1024;
+        buffer = realloc(buffer, limit);
+      }
+
+      free(buffer);
+
+      lua_pushstring(lua, "link_target");
+      lua_pushstring(lua, target ? target: "");
+      lua_settable(lua, -3);
+
+      free(target);
+    }
 
     free(gbuff);
     free(pbuff);
