@@ -746,7 +746,7 @@ main_worker (void *ptr)
   lua_pushcfunction(worker->lua, job_result);
   lua_settable(worker->lua, -3);
 
-  lua_setglobal(worker->lua, "job");
+  lua_setglobal(worker->lua, "work");
 
   lua_functions(worker->lua);
 
@@ -829,7 +829,7 @@ main_handler (void *ptr)
     lua_pushcfunction(handler->lua, results_backlog);
     lua_settable(handler->lua, -3);
 
-    lua_setglobal(handler->lua, "job");
+    lua_setglobal(handler->lua, "work");
 
     lua_functions(handler->lua);
 
