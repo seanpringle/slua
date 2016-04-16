@@ -778,6 +778,13 @@ work_pool (lua_State *lua)
 }
 
 int
+work_idle (lua_State *lua)
+{
+  lua_pushnumber(lua, channel_readers(&jobs));
+  return 1;
+}
+
+int
 results_backlog (lua_State *lua)
 {
   lua_pushnumber(lua, channel_backlog(&hself->results));
@@ -964,6 +971,10 @@ main_handler (void *ptr)
 
     lua_pushstring(handler->lua, "pool");
     lua_pushcfunction(handler->lua, work_pool);
+    lua_settable(handler->lua, -3);
+
+    lua_pushstring(handler->lua, "idle");
+    lua_pushcfunction(handler->lua, work_idle);
     lua_settable(handler->lua, -3);
 
     lua_setglobal(handler->lua, "work");
