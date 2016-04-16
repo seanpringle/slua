@@ -714,6 +714,7 @@ json_decode (lua_State *lua)
 
   if (!json || !strchr("{[", *json))
   {
+    free(json);
     lua_pushnil(lua);
     return 1;
   }
@@ -1099,6 +1100,8 @@ start(int argc, const char *argv[])
 
   memset(handlers, 0, handlers_bytes);
 
+  channel_init(&reqs, cfg.max_handlers);
+
   for (size_t ri = 0; ri < cfg.max_handlers; ri++)
   {
     ensure(pthread_mutex_init(&handlers[ri].mutex, NULL) == 0)
@@ -1112,7 +1115,7 @@ start(int argc, const char *argv[])
       errorf("pthread_create failed");
   }
 
-  channel_init(&reqs, cfg.max_handlers);
+  channel_init(&jobs, cfg.max_jobs);
 
   if (cfg.worker_path)
   {
@@ -1135,8 +1138,6 @@ start(int argc, const char *argv[])
       ensure(pthread_create(&worker->thread, NULL, main_worker, worker) == 0)
         errorf("pthread_create failed");
     }
-
-    channel_init(&jobs, cfg.max_jobs);
   }
 }
 
