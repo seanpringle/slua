@@ -771,6 +771,13 @@ work_collect (lua_State *lua)
 }
 
 int
+work_pool (lua_State *lua)
+{
+  lua_pushnumber(lua, cfg.max_workers);
+  return 1;
+}
+
+int
 results_backlog (lua_State *lua)
 {
   lua_pushnumber(lua, channel_backlog(&hself->results));
@@ -953,6 +960,10 @@ main_handler (void *ptr)
 
     lua_pushstring(handler->lua, "done");
     lua_pushcfunction(handler->lua, results_backlog);
+    lua_settable(handler->lua, -3);
+
+    lua_pushstring(handler->lua, "pool");
+    lua_pushcfunction(handler->lua, work_pool);
     lua_settable(handler->lua, -3);
 
     lua_setglobal(handler->lua, "work");
