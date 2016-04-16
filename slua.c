@@ -709,7 +709,8 @@ json_decode_step (lua_State *lua, char *json, int mode)
 int
 json_decode (lua_State *lua)
 {
-  char *json = strdup((char*)lua_popstring(lua));
+  char *str = (char*)lua_popstring(lua);
+  char *json = str ? strdup(str): NULL;
 
   if (!json || !strchr("{[", *json))
   {
