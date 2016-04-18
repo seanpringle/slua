@@ -1,3 +1,25 @@
+/*
+Copyright (c) 2016 Sean Pringle sean.pringle@gmail.com
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject to
+the following conditions:
+
+The above copyright notice and this permission notice shall be included
+in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+*/
 
 #define _GNU_SOURCE
 
@@ -20,10 +42,6 @@
 #include <sys/types.h>
 #include <pwd.h>
 #include <signal.h>
-#include <sys/stat.h>
-#include <dirent.h>
-#include <pwd.h>
-#include <grp.h>
 #include <math.h>
 
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
@@ -51,168 +69,18 @@ pthread_mutex_t stderr_mutex;
   pthread_mutex_unlock(&stderr_mutex); \
 })
 
-#define str_eq(a,b) (strcmp((a),(b)) == 0)
-
-char*
-strf (char *pattern, ...)
+const char*
+lua_popstring (lua_State *lua)
 {
-  char *result = NULL;
-  va_list args;
-  char buffer[8];
-
-  va_start(args, pattern);
-  int len = vsnprintf(buffer, sizeof(buffer), pattern, args);
-  va_end(args);
-
-  if (len > -1 && (result = malloc(len+1)) && result)
-  {
-    va_start(args, pattern);
-    vsnprintf(result, len+1, pattern, args);
-    va_end(args);
-  }
-  return result;
+  const char *str = lua_tostring(lua, -1);
+  lua_pop(lua, 1);
+  return str;
 }
 
-typedef struct _channel_node_t {
-  void *payload;
-  struct _channel_node_t *next;
-} channel_node_t;
-
-typedef struct {
-  pthread_mutex_t mutex;
-  pthread_cond_t cond_read;
-  pthread_cond_t cond_write;
-  channel_node_t *list;
-  channel_node_t *last;
-  size_t limit;
-  size_t backlog;
-  size_t readers;
-  size_t writers;
-  int used;
-} channel_t;
-
-void
-channel_init (channel_t *channel, size_t limit)
-{
-  channel->used = 1;
-  channel->backlog = 0;
-  channel->readers = 0;
-  channel->writers = 0;
-  channel->limit = limit;
-  channel->list = NULL;
-  channel->last = NULL;
-  ensure(pthread_mutex_init(&channel->mutex, NULL) == 0);
-  ensure(pthread_cond_init(&channel->cond_read, NULL) == 0);
-  ensure(pthread_cond_init(&channel->cond_write, NULL) == 0);
-}
-
-void
-channel_free (channel_t *channel)
-{
-  if (channel->used)
-  {
-    while (channel->list)
-    {
-      channel_node_t *node = channel->list;
-      channel->list = node->next;
-      free(node);
-    }
-    pthread_mutex_destroy(&channel->mutex);
-    pthread_cond_destroy(&channel->cond_read);
-    pthread_cond_destroy(&channel->cond_write);
-    free(channel->list);
-    channel->used = 0;
-  }
-}
-
-size_t
-channel_backlog (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  size_t backlog = channel->backlog;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return backlog;
-}
-
-size_t
-channel_readers (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  size_t readers = channel->readers;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return readers;
-}
-
-size_t
-channel_writers (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  size_t writers = channel->writers;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return writers;
-}
-
-void*
-channel_read (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  channel->readers++;
-
-  while (channel->backlog == 0)
-    pthread_cond_wait(&channel->cond_read, &channel->mutex);
-
-  channel->backlog--;
-
-  channel_node_t *node = channel->list;
-  channel->list = node->next;
-
-  void *msg = node->payload;
-
-  if (node == channel->last)
-    channel->last = NULL;
-
-  free(node);
-
-  if (channel->writers)
-    pthread_cond_signal(&channel->cond_write);
-
-  channel->readers--;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return msg;
-}
-
-void
-channel_write (channel_t *channel, void *msg)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  channel->writers++;
-
-  while (channel->limit > 0 && channel->backlog == channel->limit)
-    pthread_cond_wait(&channel->cond_write, &channel->mutex);
-
-  channel->backlog++;
-
-  channel_node_t *node = malloc(sizeof(channel_node_t));
-  node->payload = msg;
-  node->next = NULL;
-
-  if (!channel->list)
-  {
-    channel->list = node;
-    channel->last = node;
-  }
-  else
-  {
-    channel->last->next = node;
-    channel->last = node;
-  }
-
-  if (channel->readers)
-    pthread_cond_signal(&channel->cond_read);
-
-  channel->writers--;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-}
+#include "str.c"
+#include "channel.c"
+#include "posix.c"
+#include "json.c"
 
 #define MODE_TCP 1
 #define MODE_STDIN 2
@@ -271,525 +139,7 @@ typedef struct {
 
 channel_t jobs, reqs;
 
-const char*
-lua_popstring (lua_State *lua)
-{
-  const char *str = lua_tostring(lua, -1);
-  lua_pop(lua, 1);
-  return str;
-}
-
-int
-posix_ls (lua_State *lua)
-{
-  char *path = (char*)lua_popstring(lua);
-
-  DIR *dp;
-  struct dirent *ep;
-
-  if ((dp = opendir(path)))
-  {
-    int items = 0;
-    lua_createtable(lua, 0, 0);
-
-    while ((ep = readdir(dp)))
-    {
-      lua_pushnumber(lua, ++items);
-      lua_pushstring(lua, ep->d_name);
-      lua_settable(lua, -3);
-    }
-    closedir(dp);
-  }
-  else
-  {
-    lua_pushnil(lua);
-  }
-  return 1;
-}
-
-int
-posix_stat (lua_State *lua)
-{
-  char *path = (char*)lua_popstring(lua);
-
-  struct stat st, sst;
-
-  int lok = lstat(path, &st)  == 0;
-
-  if (lok)
-  {
-    char mode[11];
-    strcpy(mode, "----------");
-    int i = 0;
-
-    if (S_ISDIR(st.st_mode))  mode[0] = 'd'; i = 1;
-    if (S_ISLNK(st.st_mode))  mode[0] = 'l'; i = 1;
-
-    if (st.st_mode & S_IRUSR) mode[i] = 'r'; i++;
-    if (st.st_mode & S_IWUSR) mode[i] = 'w'; i++;
-    if (st.st_mode & S_IXUSR) mode[i] = 'x'; i++;
-    if (st.st_mode & S_IRGRP) mode[i] = 'r'; i++;
-    if (st.st_mode & S_IWGRP) mode[i] = 'w'; i++;
-    if (st.st_mode & S_IXGRP) mode[i] = 'x'; i++;
-    if (st.st_mode & S_IROTH) mode[i] = 'r'; i++;
-    if (st.st_mode & S_IWOTH) mode[i] = 'w'; i++;
-    if (st.st_mode & S_IXOTH) mode[i] = 'x'; i++;
-
-    int gsize = (int) sysconf(_SC_GETGR_R_SIZE_MAX);
-    char *gbuff = malloc(gsize);
-    struct group _grp, *grp = &_grp;
-
-    int grs = getgrgid_r(st.st_gid, grp, gbuff, gsize, &grp);
-
-    int psize = (int) sysconf(_SC_GETPW_R_SIZE_MAX);
-    char *pbuff = malloc(psize);
-    struct passwd _pwd, *pwd = &_pwd;
-
-    int prs = getpwuid_r(st.st_uid, pwd, pbuff, psize, &pwd);
-
-    lua_createtable(lua, 0, 0);
-
-    lua_pushstring(lua, "type");
-
-         if (S_ISDIR(st.st_mode)) lua_pushstring(lua, "directory");
-    else if (S_ISLNK(st.st_mode)) lua_pushstring(lua, "link");
-    else if (S_ISCHR(st.st_mode)) lua_pushstring(lua, "cdev");
-    else if (S_ISBLK(st.st_mode)) lua_pushstring(lua, "bdev");
-    else if (S_ISFIFO(st.st_mode)) lua_pushstring(lua, "fifo");
-    else if (S_ISREG(st.st_mode)) lua_pushstring(lua, "file");
-    else lua_pushstring(lua, "unknown");
-
-    lua_settable(lua, -3);
-
-    lua_pushstring(lua, "size");
-    lua_pushnumber(lua, st.st_size);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "inode");
-    lua_pushnumber(lua, st.st_ino);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "uid");
-    lua_pushnumber(lua, st.st_uid);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "gid");
-    lua_pushnumber(lua, st.st_gid);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "user");
-    lua_pushstring(lua, (prs == 0 && pwd ? pwd->pw_name: ""));
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "group");
-    lua_pushstring(lua, (grs == 0 && grp ? grp->gr_name: ""));
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "mode");
-    lua_pushstring(lua, mode);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "ctime");
-    lua_pushnumber(lua, (long long)st.st_ctim.tv_sec);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "mtime");
-    lua_pushnumber(lua, (long long)st.st_mtim.tv_sec);
-    lua_settable(lua, -3);
-    lua_pushstring(lua, "atime");
-    lua_pushnumber(lua, (long long)st.st_atim.tv_sec);
-    lua_settable(lua, -3);
-
-    if (S_ISLNK(st.st_mode))
-    {
-      int sok = stat(path, &sst) == 0;
-
-      lua_pushstring(lua, "intact");
-      lua_pushboolean(lua, sok);
-      lua_settable(lua, -3);
-
-      char *target = NULL;
-
-      int limit = 1024;
-      char *buffer = malloc(limit+1);
-
-      while (buffer && limit < 1024*1024)
-      {
-        int bytes = readlink(path, buffer, limit);
-        if (bytes < 0)
-        {
-          free(buffer);
-          buffer = NULL;
-          break;
-        }
-        if (bytes < limit)
-        {
-          buffer[bytes] = 0;
-          target = buffer;
-          buffer = NULL;
-          break;
-        }
-        limit += 1024;
-        buffer = realloc(buffer, limit+1);
-      }
-
-      free(buffer);
-
-      lua_pushstring(lua, "target");
-      lua_pushstring(lua, target ? target: "");
-      lua_settable(lua, -3);
-
-      free(target);
-    }
-
-    free(gbuff);
-    free(pbuff);
-  }
-  else
-  {
-    lua_pushnil(lua);
-  }
-  return 1;
-}
-
-char*
-str_quote (char *str)
-{
-  char *res = malloc(strlen(str)*2+3);
-  char *rp = res, *sp = str;
-
-  *rp++ = '"';
-
-  while (sp && *sp)
-  {
-    int c = *sp++;
-    if (c == '"') { *rp++ = '\\'; }
-    else if (c == '\\') { *rp++ = '\\'; }
-    else if (c == '\a') { *rp++ = '\\'; c = 'a'; }
-    else if (c == '\b') { *rp++ = '\\'; c = 'b'; }
-    else if (c == '\f') { *rp++ = '\\'; c = 'f'; }
-    else if (c == '\n') { *rp++ = '\\'; c = 'n'; }
-    else if (c == '\r') { *rp++ = '\\'; c = 'r'; }
-    else if (c == '\t') { *rp++ = '\\'; c = 't'; }
-    else if (c == '\v') { *rp++ = '\\'; c = 'v'; }
-    *rp++ = c;
-  }
-
-  *rp++ = '"';
-  *rp = 0;
-  return res;
-}
-
-char*
-str_unquote (char *str, char **err)
-{
-  char *res = malloc(strlen(str)+1);
-  char *rp = res, *sp = str;
-
-  sp++;
-
-  while (sp && *sp)
-  {
-    int c = *sp++;
-    if (c == '"') break;
-
-    if (c == '\\')
-    {
-           if (*sp == 'a') c = '\a';
-      else if (*sp == 'b') c = '\b';
-      else if (*sp == 'f') c = '\f';
-      else if (*sp == 'n') c = '\n';
-      else if (*sp == 'r') c = '\r';
-      else if (*sp == 't') c = '\t';
-      else if (*sp == 'v') c = '\v';
-      else c = *sp++;
-    }
-    *rp++ = c;
-  }
-  *rp = 0;
-
-  if (err)
-    *err = sp;
-
-  return res;
-}
-
-int
-json_encode (lua_State *lua)
-{
-  // check for array
-  int table_length = 0;
-  int has_strings = 0;
-  int has_numbers = 0;
-  lua_pushnil(lua);
-  while (lua_next(lua, -2))
-  {
-    if (lua_type(lua, -2) == LUA_TNUMBER) has_numbers++;
-    if (lua_type(lua, -2) == LUA_TSTRING) has_strings++;
-    lua_pop(lua, 1);
-    table_length++;
-  }
-
-  if (!table_length)
-  {
-    lua_pop(lua, 1);
-    lua_pushstring(lua, "[]");
-    return 1;
-  }
-
-  if (has_strings && has_numbers) has_numbers = 0;
-
-  int is_hash = has_strings;
-
-  int length = 0, limit = 1024;
-  char *json = malloc(limit);
-
-  json[length++] = is_hash ? '{': '[';
-
-  lua_pushnil(lua);
-  while (lua_next(lua, -2))
-  {
-    if (lua_type(lua, -2) == LUA_TSTRING || lua_type(lua, -2) == LUA_TNUMBER)
-    {
-      char *key = lua_type(lua, -2) == LUA_TSTRING
-        ? str_quote((char*)lua_tostring(lua, -2)) : NULL;
-
-      if (!key)
-      {
-        double num = lua_tonumber(lua, -2);
-        key = strf("\"%ld\"", (int64_t)num);
-      }
-
-      char *val = NULL;
-
-      switch (lua_type(lua, -1))
-      {
-        case LUA_TNIL:
-          val = strdup("null");
-          break;
-
-        case LUA_TBOOLEAN:
-          val = strdup(lua_toboolean(lua, -1) ? "true": "false");
-          break;
-
-        case LUA_TNUMBER:
-          val = strdup((char*)lua_tostring(lua, -1));
-          break;
-
-        case LUA_TSTRING:
-          val = str_quote((char*)lua_tostring(lua, -1));
-          break;
-
-        case LUA_TTABLE:
-          json_encode(lua);
-          val = strdup((char*)lua_tostring(lua, -1));
-          break;
-      }
-
-      if (val)
-      {
-        limit += strlen(key) + strlen(val) + 3;
-        json = realloc(json, limit);
-
-        if (is_hash)
-        {
-          length += snprintf(json+length, limit-length, "%s:%s,", key, val);
-        }
-        else
-        {
-          length += snprintf(json+length, limit-length, "%s,", val);
-        }
-      }
-
-      free(key);
-      free(val);
-    }
-    lua_pop(lua, 1);
-  }
-
-  json[length-1] = is_hash ? '}': ']';
-  json[length] = 0;
-
-  lua_pop(lua, 1);
-  lua_pushstring(lua, json);
-  free(json);
-
-  return 1;
-}
-
-char*
-json_decode_step (lua_State *lua, char *json, int mode)
-{
-  lua_createtable(lua, 0, 0);
-  int table_size = 0;
-
-  int pushed = 0;
-  char *str;
-  double num;
-
-  while (json && *json && strchr(", \t\r\n", *json)) json++;
-
-  char *last = NULL;
-
-  while (json && *json)
-  {
-    int c = *json++;
-
-    if (c == ']' || c == '}' || last == json)
-    {
-      if (pushed)
-        lua_pop(lua, pushed);
-      break;
-    }
-
-    last = json;
-
-    switch (c)
-    {
-      case '[':
-        json = json_decode_step(lua, json, 1);
-        pushed++;
-        break;
-
-      case '{':
-        json = json_decode_step(lua, json, 2);
-        pushed++;
-        break;
-
-      case '"':
-        str = str_unquote(json-1, &json);
-        lua_pushstring(lua, str);
-        free(str);
-        pushed++;
-        break;
-
-      case 'n':
-        lua_pushnil(lua);
-        pushed++;
-        break;
-
-      default:
-        num = strtod(json-1, &json);
-        lua_pushnumber(lua, num);
-        pushed++;
-        break;
-    }
-
-    while (json && *json && strchr(", \t\r\n", *json)) json++;
-
-    if (*json == ':')
-    {
-      json++;
-      while (json && *json && strchr(", \t\r\n", *json)) json++;
-
-      if (mode == 1 && pushed)
-      {
-        lua_pop(lua, pushed);
-        pushed = 0;
-      }
-      continue;
-    }
-
-    if (mode == 1 && pushed == 1)
-    {
-      lua_pushnumber(lua, ++table_size);
-      lua_insert(lua, -2);
-      lua_settable(lua, -3);
-      pushed = 0;
-    }
-    else
-    if (mode == 2 && pushed == 2)
-    {
-      lua_settable(lua, -3);
-      pushed = 0;
-    }
-    else
-    {
-      errorf("unexpected state, mode: %d, pushed: %d", mode, pushed);
-      break;
-    }
-  }
-
-  while (json && *json && strchr(", \t\r\n", *json)) json++;
-  return json;
-}
-
-int
-json_decode (lua_State *lua)
-{
-  char *str = (char*)lua_popstring(lua);
-  char *json = str ? strdup(str): NULL;
-
-  if (!json || !strchr("{[", *json))
-  {
-    free(json);
-    lua_pushnil(lua);
-    return 1;
-  }
-
-  int c = *json;
-  json_decode_step(lua, json+1, c == '{' ? 2: 1);
-  free(json);
-  return 1;
-}
-
-int
-work_accept (lua_State *lua)
-{
-  message_t *message = channel_read(&jobs);
-  if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
-  wself->result = message->result;
-  free(message->payload);
-  free(message);
-  return 1;
-}
-
-int
-work_result (lua_State *lua)
-{
-  channel_write(wself->result,
-    lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL);
-  return 0;
-}
-
-int
-work_submit (lua_State *lua)
-{
-  ensure(cfg.worker_path)
-    errorf("no workers");
-
-  message_t *message = malloc(sizeof(message_t));
-  message->result = &hself->results;
-  message->payload = lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL;
-
-  channel_write(&jobs, message);
-  return 0;
-}
-
-int
-work_collect (lua_State *lua)
-{
-  ensure(cfg.worker_path)
-    errorf("no workers");
-
-  char *payload = channel_read(&hself->results);
-  if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
-  free(payload);
-  return 1;
-}
-
-int
-work_pool (lua_State *lua)
-{
-  lua_pushnumber(lua, cfg.max_workers);
-  return 1;
-}
-
-int
-work_idle (lua_State *lua)
-{
-  lua_pushnumber(lua, channel_readers(&jobs));
-  return 1;
-}
-
-int
-results_backlog (lua_State *lua)
-{
-  lua_pushnumber(lua, channel_backlog(&hself->results));
-  return 1;
-}
+#include "work.c"
 
 int
 safe_print (lua_State *lua)
@@ -817,35 +167,55 @@ safe_error (lua_State *lua)
   return 0;
 }
 
+struct function_map {
+  const char *table;
+  const char *name;
+  lua_CFunction func;
+};
+
+struct function_map registry_common[] = {
+  { .table = "io",    .name = "stat",        .func = posix_stat  },
+  { .table = "io",    .name = "ls",          .func = posix_ls    },
+  { .table = "table", .name = "json_encode", .func = json_encode },
+  { .table = "table", .name = "json_decode", .func = json_decode },
+  { .table = NULL,    .name = "print",       .func = safe_print  },
+  { .table = NULL,    .name = "error",       .func = safe_error  },
+};
+
+struct function_map registry_handler[] = {
+  { .table = "work", .name = "submit",  .func = work_submit  },
+  { .table = "work", .name = "collect", .func = work_collect },
+  { .table = "work", .name = "done",    .func = work_done    },
+  { .table = "work", .name = "pool",    .func = work_pool    },
+  { .table = "work", .name = "idle",    .func = work_idle    },
+};
+
+struct function_map registry_worker[] = {
+  { .table = "work", .name = "accept", .func = work_accept },
+  { .table = "work", .name = "result", .func = work_result },
+};
+
 void
-lua_functions(lua_State *lua)
+lua_functions(lua_State *lua, struct function_map *map, size_t cells)
 {
-  lua_getglobal(lua, "io");
+  for (size_t i = 0; i < cells; i++)
+  {
+    struct function_map *fm = &map[i];
 
-  lua_pushstring(lua, "stat");
-  lua_pushcfunction(lua, posix_stat);
-  lua_settable(lua, -3);
-  lua_pushstring(lua, "ls");
-  lua_pushcfunction(lua, posix_ls);
-  lua_settable(lua, -3);
-
-  lua_pop(lua, 1);
-
-  lua_getglobal(lua, "table");
-
-  lua_pushstring(lua, "json_encode");
-  lua_pushcfunction(lua, json_encode);
-  lua_settable(lua, -3);
-  lua_pushstring(lua, "json_decode");
-  lua_pushcfunction(lua, json_decode);
-  lua_settable(lua, -3);
-
-  lua_pop(lua, 1);
-
-  lua_pushcfunction(lua, safe_print);
-  lua_setglobal(lua, "print");
-  lua_pushcfunction(lua, safe_error);
-  lua_setglobal(lua, "error");
+    if (fm->table)
+    {
+      lua_getglobal(lua, fm->table);
+      lua_pushstring(lua, fm->name);
+      lua_pushcfunction(lua, fm->func);
+      lua_settable(lua, -3);
+      lua_pop(lua, 1);
+    }
+    else
+    {
+      lua_pushcfunction(lua, fm->func);
+      lua_setglobal(lua, fm->name);
+    }
+  }
 }
 
 int
@@ -877,18 +247,10 @@ main_worker (void *ptr)
   worker->rc = EXIT_SUCCESS;
 
   lua_createtable(worker->lua, 0, 0);
-
-  lua_pushstring(worker->lua, "accept");
-  lua_pushcfunction(worker->lua, work_accept);
-  lua_settable(worker->lua, -3);
-
-  lua_pushstring(worker->lua, "result");
-  lua_pushcfunction(worker->lua, work_result);
-  lua_settable(worker->lua, -3);
-
   lua_setglobal(worker->lua, "work");
 
-  lua_functions(worker->lua);
+  lua_functions(worker->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
+  lua_functions(worker->lua, registry_worker, sizeof(registry_worker) / sizeof(struct function_map));
 
   if ( (cfg.worker_path && luaL_dofile(worker->lua,   cfg.worker_path) != 0)
     || (cfg.worker_code && luaL_dostring(worker->lua, cfg.worker_code) != 0))
@@ -956,30 +318,10 @@ main_handler (void *ptr)
     handler->rc = EXIT_SUCCESS;
 
     lua_createtable(handler->lua, 0, 0);
-
-    lua_pushstring(handler->lua, "submit");
-    lua_pushcfunction(handler->lua, work_submit);
-    lua_settable(handler->lua, -3);
-
-    lua_pushstring(handler->lua, "collect");
-    lua_pushcfunction(handler->lua, work_collect);
-    lua_settable(handler->lua, -3);
-
-    lua_pushstring(handler->lua, "done");
-    lua_pushcfunction(handler->lua, results_backlog);
-    lua_settable(handler->lua, -3);
-
-    lua_pushstring(handler->lua, "pool");
-    lua_pushcfunction(handler->lua, work_pool);
-    lua_settable(handler->lua, -3);
-
-    lua_pushstring(handler->lua, "idle");
-    lua_pushcfunction(handler->lua, work_idle);
-    lua_settable(handler->lua, -3);
-
     lua_setglobal(handler->lua, "work");
 
-    lua_functions(handler->lua);
+    lua_functions(handler->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
+    lua_functions(handler->lua, registry_handler, sizeof(registry_handler) / sizeof(struct function_map));
 
     if ( (cfg.handler_path && luaL_dofile(handler->lua,   cfg.handler_path) != 0)
       || (cfg.handler_code && luaL_dostring(handler->lua, cfg.handler_code) != 0))
