@@ -50,8 +50,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #define ensure(x) for ( ; !(x) ; exit(EXIT_FAILURE) )
 
 static pthread_key_t key_self;
-#define hself ((handler_t*)pthread_getspecific(key_self))
-#define wself ((worker_t*)pthread_getspecific(key_self))
+#define self ((thread_t*)pthread_getspecific(key_self))
 
 pthread_mutex_t stdout_mutex;
 pthread_mutex_t stderr_mutex;
@@ -107,26 +106,16 @@ typedef struct {
   int active;
   int done;
   int rc;
-  pthread_t thread;
-  lua_State *lua;
-  channel_t *result;
-} worker_t;
-
-worker_t *workers;
-
-typedef struct {
-  pthread_mutex_t mutex;
-  int active;
-  int done;
-  int rc;
   int io;
   FILE *fio;
   pthread_t thread;
   lua_State *lua;
   channel_t results;
-} handler_t;
+  channel_t *result;
+} thread_t;
 
-handler_t *handlers;
+thread_t *workers;
+thread_t *handlers;
 
 typedef struct {
   char *payload;
@@ -185,14 +174,23 @@ struct function_map registry_common[] = {
 struct function_map registry_handler[] = {
   { .table = "work", .name = "submit",  .func = work_submit  },
   { .table = "work", .name = "collect", .func = work_collect },
-  { .table = "work", .name = "done",    .func = work_done    },
+  { .table = "work", .name = "accept",  .func = work_accept  },
+  { .table = "work", .name = "can_accept",  .func = work_can_accept  },
+  { .table = "work", .name = "answer",  .func = work_answer  },
+  { .table = "work", .name = "can_collect", .func = work_can_collect },
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
 };
 
 struct function_map registry_worker[] = {
-  { .table = "work", .name = "accept", .func = work_accept },
-  { .table = "work", .name = "result", .func = work_result },
+  { .table = "work", .name = "submit",  .func = work_submit  },
+  { .table = "work", .name = "collect", .func = work_collect },
+  { .table = "work", .name = "accept",  .func = work_accept  },
+  { .table = "work", .name = "can_accept",  .func = work_can_accept  },
+  { .table = "work", .name = "answer",  .func = work_answer  },
+  { .table = "work", .name = "can_collect", .func = work_can_collect },
+  { .table = "work", .name = "pool",    .func = work_pool    },
+  { .table = "work", .name = "idle",    .func = work_idle    },
 };
 
 void
@@ -221,11 +219,11 @@ lua_functions(lua_State *lua, struct function_map *map, size_t cells)
 int
 close_io (lua_State *lua)
 {
-  if (hself->fio && hself->io != fileno(stdin))
+  if (self->fio && self->io != fileno(stdin))
   {
-    fclose(hself->fio);
-    hself->fio = NULL;
-    hself->io = 0;
+    fclose(self->fio);
+    self->fio = NULL;
+    self->io = 0;
   }
   return 0;
 }
@@ -233,7 +231,7 @@ close_io (lua_State *lua)
 void*
 main_worker (void *ptr)
 {
-  worker_t *worker = ptr;
+  thread_t *worker = ptr;
   pthread_mutex_lock(&worker->mutex);
 
   ensure(pthread_setspecific(key_self, worker) == 0)
@@ -270,7 +268,7 @@ main_worker (void *ptr)
 void*
 main_handler (void *ptr)
 {
-  handler_t *handler = ptr;
+  thread_t *handler = ptr;
   pthread_mutex_lock(&handler->mutex);
 
   ensure(pthread_setspecific(key_self, handler) == 0)
@@ -457,7 +455,7 @@ start(int argc, const char *argv[])
   ensure(pthread_key_create(&key_self, NULL) == 0)
     errorf("pthread_key_create failed");
 
-  size_t handlers_bytes = sizeof(handler_t) * cfg.max_handlers;
+  size_t handlers_bytes = sizeof(thread_t) * cfg.max_handlers;
 
   ensure(handlers = malloc(handlers_bytes))
     errorf("malloc failed %lu", handlers_bytes);
@@ -471,7 +469,7 @@ start(int argc, const char *argv[])
     ensure(pthread_mutex_init(&handlers[ri].mutex, NULL) == 0)
       errorf("pthread_mutex_init failed");
 
-    handler_t *handler = &handlers[ri];
+    thread_t *handler = &handlers[ri];
 
     handler->active = 1;
 
@@ -483,7 +481,7 @@ start(int argc, const char *argv[])
 
   if (cfg.worker_path)
   {
-    size_t workers_bytes = sizeof(handler_t) * cfg.max_workers;
+    size_t workers_bytes = sizeof(thread_t) * cfg.max_workers;
 
     ensure(workers = malloc(workers_bytes))
       errorf("malloc failed %lu", workers_bytes);
@@ -495,7 +493,7 @@ start(int argc, const char *argv[])
       ensure(pthread_mutex_init(&workers[wi].mutex, NULL) == 0)
         errorf("pthread_mutex_init failed");
 
-      worker_t *worker = &workers[wi];
+      thread_t *worker = &workers[wi];
 
       worker->active = 1;
 

@@ -26,16 +26,23 @@ work_accept (lua_State *lua)
 {
   message_t *message = channel_read(&jobs);
   if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
-  wself->result = message->result;
+  self->result = message->result;
   free(message->payload);
   free(message);
   return 1;
 }
 
 int
-work_result (lua_State *lua)
+work_can_accept (lua_State *lua)
 {
-  channel_write(wself->result,
+  lua_pushnumber(lua, channel_backlog(&jobs));
+  return 1;
+}
+
+int
+work_answer (lua_State *lua)
+{
+  channel_write(self->result,
     lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL);
   return 0;
 }
@@ -47,7 +54,7 @@ work_submit (lua_State *lua)
     errorf("no workers");
 
   message_t *message = malloc(sizeof(message_t));
-  message->result = &hself->results;
+  message->result = &self->results;
   message->payload = lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL;
 
   channel_write(&jobs, message);
@@ -60,9 +67,16 @@ work_collect (lua_State *lua)
   ensure(cfg.worker_path)
     errorf("no workers");
 
-  char *payload = channel_read(&hself->results);
+  char *payload = channel_read(&self->results);
   if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
   free(payload);
+  return 1;
+}
+
+int
+work_can_collect (lua_State *lua)
+{
+  lua_pushnumber(lua, channel_backlog(&self->results));
   return 1;
 }
 
@@ -80,9 +94,3 @@ work_idle (lua_State *lua)
   return 1;
 }
 
-int
-work_done (lua_State *lua)
-{
-  lua_pushnumber(lua, channel_backlog(&hself->results));
-  return 1;
-}
