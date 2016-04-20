@@ -408,7 +408,12 @@ start(int argc, const char *argv[])
   ensure(sqlite3_threadsafe())
     errorf("sqlite3_threadsafe failed");
 
+  #ifdef SQLITE_CONFIG_URI
   sqlite3_config(SQLITE_CONFIG_URI, 1);
+  #else
+  errorf("warning: old sqlite3 library!")
+  #endif
+
   sqlite3_initialize();
 
   long cores = sysconf(_SC_NPROCESSORS_ONLN);
