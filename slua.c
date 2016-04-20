@@ -106,6 +106,7 @@ typedef struct {
   const char *setuid_name;
   size_t max_jobs;
   size_t max_results;
+  const char *db_path;
 } config_t;
 
 config_t cfg;
@@ -423,6 +424,7 @@ start(int argc, const char *argv[])
   cfg.setuid_name  = NULL;
   cfg.max_jobs     = 0;
   cfg.max_results  = 0;
+  cfg.db_path      = NULL;
 
   signal(SIGINT,  sig_int);
   signal(SIGTERM, sig_term);
@@ -475,6 +477,12 @@ start(int argc, const char *argv[])
       ensure(argi < argc-1) errorf("expected (-e|--execute) <value>");
       cfg.handler_path = argv[++argi];
       cfg.worker_path  = argv[++argi];
+      continue;
+    }
+    if (str_eq(argv[argi], "-db") || str_eq(argv[argi], "--database"))
+    {
+      ensure(argi < argc-1) errorf("expected (-db|--database) <value>");
+      cfg.db_path = argv[++argi];
       continue;
     }
 

@@ -107,17 +107,17 @@ db_open ()
 {
   #ifdef SQLITE_OPEN_URI
 
-    int flags = SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+    int flags = SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_SHAREDCACHE;
 
-    ensure(sqlite3_open_v2("file:db?mode=memory&cache=shared", &self->db, flags, NULL) == SQLITE_OK)
+    ensure(sqlite3_open_v2(cfg.db_path ? cfg.db_path: "file:db?mode=memory&cache=shared", &self->db, flags, NULL) == SQLITE_OK)
         errorf("sqlite3_open_v2 failed");
 
   #else
 
-    int flags = SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+    int flags = SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE | SQLITE_OPEN_SHAREDCACHE;
 
-    // empty string means on-disk temp database in TMPDIR
-    ensure(sqlite3_open_v2("", &self->db, flags, NULL) == SQLITE_OK)
+    // empty string means on-disk (TMPDIR) temporary database auto-deleted on close
+    ensure(sqlite3_open_v2(cfg.db_path ? cfg.db_path: "", &self->db, flags, NULL) == SQLITE_OK)
         errorf("sqlite3_open_v2 failed");
 
   #endif

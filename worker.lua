@@ -26,4 +26,13 @@ while true do
   local msg = work.accept()
   work.answer("got "..msg)
 
+  local rows = db.read([[
+    SELECT * FROM t1
+  ]])
+
+  for i,row in ipairs(rows) do
+    for key,val in pairs(row) do
+      print(key.." => "..val)
+    end
+  end
 end

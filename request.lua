@@ -21,6 +21,14 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 --]]
 
+db.write([[
+  CREATE TABLE t1 (c1 int)
+]])
+
+db.write([[
+  INSERT INTO t1 VALUES (42)
+]])
+
 work.submit("hello")
 print(work.collect())
 
