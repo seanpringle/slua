@@ -101,3 +101,31 @@ db_escape (lua_State *lua)
   free(res);
   return 1;
 }
+
+void
+db_open ()
+{
+  #ifdef SQLITE_OPEN_URI
+
+    int flags = SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+
+    ensure(sqlite3_open_v2("file:db?mode=memory&cache=shared", &self->db, flags, NULL) == SQLITE_OK)
+        errorf("sqlite3_open_v2 failed");
+
+  #else
+
+    int flags = SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+
+    // empty string means on-disk temp database in TMPDIR
+    ensure(sqlite3_open_v2("", &self->db, flags, NULL) == SQLITE_OK)
+        errorf("sqlite3_open_v2 failed");
+
+  #endif
+}
+
+void
+db_close()
+{
+  sqlite3_close(self->db);
+  self->db = NULL;
+}

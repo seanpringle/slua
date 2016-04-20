@@ -258,6 +258,8 @@ main_worker (void *ptr)
 
   worker->rc = EXIT_SUCCESS;
 
+  db_open();
+
   lua_createtable(worker->lua, 0, 0);
   lua_pushstring(worker->lua, "NULL");
   lua_pushlightuserdata(worker->lua, NULL);
@@ -281,6 +283,7 @@ main_worker (void *ptr)
   }
 
   lua_close(worker->lua);
+  db_close();
 
   worker->done = 1;
   pthread_mutex_unlock(&worker->mutex);
@@ -300,11 +303,6 @@ main_handler (void *ptr)
   channel_init(&handler->results, cfg.max_results);
 
   request_t *request = NULL;
-
-  int flags = SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
-
-  ensure(sqlite3_open_v2("file:db?mode=memory&cache=shared", &self->db, flags, NULL) == SQLITE_OK)
-      errorf("sqlite3_open_v2 failed");
 
   while ((request = channel_read(&reqs)))
   {
@@ -343,6 +341,8 @@ main_handler (void *ptr)
 
     handler->rc = EXIT_SUCCESS;
 
+    db_open();
+
     lua_createtable(handler->lua, 0, 0);
     lua_pushstring(handler->lua, "NULL");
     lua_pushlightuserdata(handler->lua, NULL);
@@ -367,11 +367,10 @@ main_handler (void *ptr)
 
     close_io(handler->lua);
     lua_close(handler->lua);
+    db_close();
   }
 
   channel_free(&handler->results);
-
-  sqlite3_close(self->db);
 
   handler->done = 1;
   pthread_mutex_unlock(&handler->mutex);
@@ -407,12 +406,6 @@ start(int argc, const char *argv[])
 
   ensure(sqlite3_threadsafe())
     errorf("sqlite3_threadsafe failed");
-
-  #ifdef SQLITE_CONFIG_URI
-  sqlite3_config(SQLITE_CONFIG_URI, 1);
-  #else
-  errorf("warning: old sqlite3 library!");
-  #endif
 
   sqlite3_initialize();
 
