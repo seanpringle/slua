@@ -43,6 +43,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <pwd.h>
 #include <signal.h>
 #include <math.h>
+#include <sqlite3.h>
 
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
 #define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
@@ -74,6 +75,14 @@ lua_popstring (lua_State *lua)
   const char *str = lua_tostring(lua, -1);
   lua_pop(lua, 1);
   return str;
+}
+
+double
+lua_popnumber (lua_State *lua)
+{
+  double n = lua_tonumber(lua, -1);
+  lua_pop(lua, 1);
+  return n;
 }
 
 #include "str.c"
@@ -112,6 +121,7 @@ typedef struct {
   lua_State *lua;
   channel_t results;
   channel_t *result;
+  sqlite3 *db;
 } thread_t;
 
 thread_t *workers;
@@ -129,6 +139,7 @@ typedef struct {
 channel_t jobs, reqs;
 
 #include "work.c"
+#include "db.c"
 
 int
 safe_print (lua_State *lua)
@@ -167,6 +178,9 @@ struct function_map registry_common[] = {
   { .table = "io",    .name = "ls",          .func = posix_ls    },
   { .table = "table", .name = "json_encode", .func = json_encode },
   { .table = "table", .name = "json_decode", .func = json_decode },
+  { .table = "db",    .name = "read",        .func = db_read     },
+  { .table = "db",    .name = "write",       .func = db_write    },
+  { .table = "db",    .name = "escape",      .func = db_escape   },
   { .table = NULL,    .name = "print",       .func = safe_print  },
   { .table = NULL,    .name = "error",       .func = safe_error  },
 };
@@ -175,9 +189,9 @@ struct function_map registry_handler[] = {
   { .table = "work", .name = "submit",  .func = work_submit  },
   { .table = "work", .name = "collect", .func = work_collect },
   { .table = "work", .name = "accept",  .func = work_accept  },
-  { .table = "work", .name = "can_accept",  .func = work_can_accept  },
+  { .table = "work", .name = "try_accept",  .func = work_try_accept  },
   { .table = "work", .name = "answer",  .func = work_answer  },
-  { .table = "work", .name = "can_collect", .func = work_can_collect },
+  { .table = "work", .name = "try_collect", .func = work_try_collect },
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
 };
@@ -186,9 +200,9 @@ struct function_map registry_worker[] = {
   { .table = "work", .name = "submit",  .func = work_submit  },
   { .table = "work", .name = "collect", .func = work_collect },
   { .table = "work", .name = "accept",  .func = work_accept  },
-  { .table = "work", .name = "can_accept",  .func = work_can_accept  },
+  { .table = "work", .name = "try_accept",  .func = work_try_accept  },
   { .table = "work", .name = "answer",  .func = work_answer  },
-  { .table = "work", .name = "can_collect", .func = work_can_collect },
+  { .table = "work", .name = "try_collect", .func = work_try_collect },
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
 };
@@ -245,6 +259,15 @@ main_worker (void *ptr)
   worker->rc = EXIT_SUCCESS;
 
   lua_createtable(worker->lua, 0, 0);
+  lua_pushstring(worker->lua, "NULL");
+  lua_pushlightuserdata(worker->lua, NULL);
+  lua_settable(worker->lua, -3);
+  lua_setglobal(worker->lua, "db");
+
+  lua_createtable(worker->lua, 0, 0);
+  lua_pushstring(worker->lua, "self");
+  lua_pushstring(worker->lua, "worker");
+  lua_settable(worker->lua, -3);
   lua_setglobal(worker->lua, "work");
 
   lua_functions(worker->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
@@ -277,6 +300,10 @@ main_handler (void *ptr)
   channel_init(&handler->results, cfg.max_results);
 
   request_t *request = NULL;
+
+  ensure(sqlite3_open_v2("file:db?mode=memory&cache=shared", &self->db,
+    SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) == SQLITE_OK)
+      errorf("sqlite3_open_v2 failed");
 
   while ((request = channel_read(&reqs)))
   {
@@ -316,6 +343,15 @@ main_handler (void *ptr)
     handler->rc = EXIT_SUCCESS;
 
     lua_createtable(handler->lua, 0, 0);
+    lua_pushstring(handler->lua, "NULL");
+    lua_pushlightuserdata(handler->lua, NULL);
+    lua_settable(handler->lua, -3);
+    lua_setglobal(handler->lua, "db");
+
+    lua_createtable(handler->lua, 0, 0);
+    lua_pushstring(handler->lua, "self");
+    lua_pushstring(handler->lua, "handler");
+    lua_settable(handler->lua, -3);
     lua_setglobal(handler->lua, "work");
 
     lua_functions(handler->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
@@ -333,6 +369,8 @@ main_handler (void *ptr)
   }
 
   channel_free(&handler->results);
+
+  sqlite3_close(self->db);
 
   handler->done = 1;
   pthread_mutex_unlock(&handler->mutex);
@@ -363,6 +401,7 @@ sig_term(int sig)
 void
 start(int argc, const char *argv[])
 {
+  struct stat st;
   long cores = sysconf(_SC_NPROCESSORS_ONLN);
 
   cfg.mode         = MODE_STDIN;
@@ -424,9 +463,25 @@ start(int argc, const char *argv[])
       cfg.max_handlers = strtol(argv[++argi], NULL, 0);
       continue;
     }
+    if (str_eq(argv[argi], "-e") || str_eq(argv[argi], "--execute"))
+    {
+      ensure(argi < argc-1) errorf("expected (-e|--execute) <value>");
+      cfg.handler_path = argv[++argi];
+      cfg.worker_path  = argv[++argi];
+      continue;
+    }
 
-    ensure(argv[argi][0] != '-')
-      errorf("huh? %s", argv[argi]);
+    if (!cfg.handler_path && stat(argv[argi], &st) == 0)
+    {
+      cfg.handler_path = argv[argi];
+      continue;
+    }
+
+    if (!cfg.worker_path && stat(argv[argi], &st) == 0)
+    {
+      cfg.worker_path = argv[argi];
+      continue;
+    }
 
     if (!cfg.handler_code)
     {
@@ -507,6 +562,9 @@ int
 main(int argc, char const *argv[])
 {
   start(argc, argv);
+
+  ensure(sqlite3_threadsafe())
+    errorf("sqlite3_threadsafe failed");
 
   if (cfg.mode == MODE_TCP)
   {

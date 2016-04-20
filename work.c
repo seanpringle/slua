@@ -33,9 +33,21 @@ work_accept (lua_State *lua)
 }
 
 int
-work_can_accept (lua_State *lua)
+work_try_accept (lua_State *lua)
 {
-  lua_pushnumber(lua, channel_backlog(&jobs));
+  message_t *message = NULL;
+
+  if (channel_try_read(&jobs, (void**)&message))
+  {
+    if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
+    self->result = message->result;
+    free(message->payload);
+    free(message);
+    lua_pushboolean(lua, 1);
+    return 2;
+  }
+
+  lua_pushboolean(lua, 0);
   return 1;
 }
 
@@ -74,9 +86,21 @@ work_collect (lua_State *lua)
 }
 
 int
-work_can_collect (lua_State *lua)
+work_try_collect (lua_State *lua)
 {
-  lua_pushnumber(lua, channel_backlog(&self->results));
+  ensure(cfg.worker_path)
+    errorf("no workers");
+
+  char *payload = NULL;
+  if (channel_try_read(&self->results, (void**)&payload))
+  {
+    if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
+    lua_pushboolean(lua, 1);
+    free(payload);
+    return 2;
+  }
+
+  lua_pushboolean(lua, 0);
   return 1;
 }
 
