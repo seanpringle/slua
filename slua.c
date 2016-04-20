@@ -301,8 +301,9 @@ main_handler (void *ptr)
 
   request_t *request = NULL;
 
-  ensure(sqlite3_open_v2("file:db?mode=memory&cache=shared", &self->db,
-    SQLITE_OPEN_URI | SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, NULL) == SQLITE_OK)
+  int flags = SQLITE_OPEN_NOMUTEX | SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE;
+
+  ensure(sqlite3_open_v2("file:db?mode=memory&cache=shared", &self->db, flags, NULL) == SQLITE_OK)
       errorf("sqlite3_open_v2 failed");
 
   while ((request = channel_read(&reqs)))
@@ -381,6 +382,7 @@ main_handler (void *ptr)
 void
 stop(int rc)
 {
+  sqlite3_shutdown();
   exit(rc);
 }
 
@@ -402,6 +404,13 @@ void
 start(int argc, const char *argv[])
 {
   struct stat st;
+
+  ensure(sqlite3_threadsafe())
+    errorf("sqlite3_threadsafe failed");
+
+  sqlite3_config(SQLITE_CONFIG_URI, 1);
+  sqlite3_initialize();
+
   long cores = sysconf(_SC_NPROCESSORS_ONLN);
 
   cfg.mode         = MODE_STDIN;
@@ -562,9 +571,6 @@ int
 main(int argc, char const *argv[])
 {
   start(argc, argv);
-
-  ensure(sqlite3_threadsafe())
-    errorf("sqlite3_threadsafe failed");
 
   if (cfg.mode == MODE_TCP)
   {
