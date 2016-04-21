@@ -126,12 +126,13 @@ work_backlog (lua_State *lua)
 }
 
 int
-work_todo (lua_State *lua)
+work_jobs (lua_State *lua)
 {
+  int count = 0;
   ensure(pthread_mutex_lock(&jobs.mutex) == 0);
-  int backlog = jobs.backlog;
-  int readers = jobs.readers;
+  count += jobs.backlog;
+  count += (cfg.max_workers - readers);
   ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
-  lua_pushboolean(lua, backlog > 0 || readers < cfg.max_workers);
+  count += channel_backlog(self->results);
   return 1;
 }
