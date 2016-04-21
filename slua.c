@@ -181,7 +181,6 @@ struct function_map {
 struct function_map registry_common[] = {
   { .table = "io",    .name = "stat",        .func = posix_stat       },
   { .table = "io",    .name = "ls",          .func = posix_ls         },
-  { .table = "os",    .name = "usleep",      .func = posix_usleep     },
   { .table = "table", .name = "json_encode", .func = json_encode      },
   { .table = "table", .name = "json_decode", .func = json_decode      },
   { .table = "db",    .name = "read",        .func = db_read          },
@@ -190,12 +189,15 @@ struct function_map registry_common[] = {
   { .table = NULL,    .name = "print",       .func = safe_print       },
   { .table = NULL,    .name = "error",       .func = safe_error       },
   { .table = "work",  .name = "submit",      .func = work_submit      },
-  { .table = "work",  .name = "collect",     .func = work_collect     },
   { .table = "work",  .name = "accept",      .func = work_accept      },
   { .table = "work",  .name = "answer",      .func = work_answer      },
   { .table = "work",  .name = "pool",        .func = work_pool        },
   { .table = "work",  .name = "idle",        .func = work_idle        },
   { .table = "work",  .name = "backlog",     .func = work_backlog     },
+};
+
+struct function_map registry_handler[] = {
+  { .table = "work",  .name = "collect",     .func = work_collect     },
   { .table = "work",  .name = "unfinished",  .func = work_unfinished  },
 };
 
@@ -349,6 +351,7 @@ main_handler (void *ptr)
     lua_setglobal(handler->lua, "work");
 
     lua_functions(handler->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
+    lua_functions(handler->lua, registry_handler, sizeof(registry_handler) / sizeof(struct function_map));
 
     if ( (cfg.handler_path && luaL_dofile(handler->lua,   cfg.handler_path) != 0)
       || (cfg.handler_code && luaL_dostring(handler->lua, cfg.handler_code) != 0))
