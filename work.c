@@ -90,11 +90,13 @@ work_backlog (lua_State *lua)
 int
 work_unfinished (lua_State *lua)
 {
+  ensure(pthread_mutex_lock(&self->results.mutex) == 0);
   ensure(pthread_mutex_lock(&jobs.mutex) == 0);
-  int count = channel_backlog(&self->results);
+  int count = self->results.backlog;
   count += jobs.backlog;
   count += (cfg.max_workers - jobs.readers);
   ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
+  ensure(pthread_mutex_unlock(&self->results.mutex) == 0);
   lua_pushnumber(lua, count);
   return 1;
 }
