@@ -27,8 +27,16 @@ work_accept (lua_State *lua)
   message_t *message = channel_read(&jobs);
   if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
   self->result = message->result;
-  free(message->payload);
+  free(self->payload);
+  self->payload = message->payload;
   free(message);
+  return 1;
+}
+
+int
+work_current (lua_State *lua)
+{
+  if (self->payload) lua_pushstring(lua, self->payload); else lua_pushnil(lua);
   return 1;
 }
 

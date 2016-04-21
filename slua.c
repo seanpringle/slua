@@ -127,6 +127,7 @@ typedef struct {
   channel_t results;
   channel_t *result;
   sqlite3 *db;
+  void *payload;
 } thread_t;
 
 thread_t *workers;
@@ -190,6 +191,7 @@ struct function_map registry_common[] = {
   { .table = NULL,    .name = "error",       .func = safe_error       },
   { .table = "work",  .name = "submit",      .func = work_submit      },
   { .table = "work",  .name = "accept",      .func = work_accept      },
+  { .table = "work",  .name = "current",     .func = work_current     },
   { .table = "work",  .name = "answer",      .func = work_answer      },
   { .table = "work",  .name = "pool",        .func = work_pool        },
   { .table = "work",  .name = "idle",        .func = work_idle        },
@@ -278,6 +280,7 @@ main_worker (void *ptr)
 
   lua_close(worker->lua);
   db_close();
+  free(worker->payload);
 
   worker->done = 1;
   pthread_mutex_unlock(&worker->mutex);
@@ -363,6 +366,7 @@ main_handler (void *ptr)
     close_io(handler->lua);
     lua_close(handler->lua);
     db_close();
+    free(handler->payload);
 
     if (cfg.mode == MODE_STDIN)
       break;
