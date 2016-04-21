@@ -133,6 +133,6 @@ work_jobs (lua_State *lua)
   count += jobs.backlog;
   count += (cfg.max_workers - jobs.readers);
   ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
-  count += channel_backlog(self->results);
+  count += channel_backlog(&self->results);
   return 1;
 }
