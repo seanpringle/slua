@@ -62,7 +62,7 @@ work_answer (lua_State *lua)
 int
 work_submit (lua_State *lua)
 {
-  ensure(cfg.worker_path)
+  ensure(cfg.worker_path || cfg.worker_code)
     errorf("no workers");
 
   message_t *message = malloc(sizeof(message_t));
@@ -76,7 +76,7 @@ work_submit (lua_State *lua)
 int
 work_collect (lua_State *lua)
 {
-  ensure(cfg.worker_path)
+  ensure(cfg.worker_path || cfg.worker_code)
     errorf("no workers");
 
   char *payload = channel_read(&self->results);
@@ -88,7 +88,7 @@ work_collect (lua_State *lua)
 int
 work_try_collect (lua_State *lua)
 {
-  ensure(cfg.worker_path)
+  ensure(cfg.worker_path || cfg.worker_code)
     errorf("no workers");
 
   char *payload = NULL;

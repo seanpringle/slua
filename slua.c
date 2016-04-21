@@ -558,7 +558,7 @@ start(int argc, const char *argv[])
 
   channel_init(&jobs, cfg.max_jobs);
 
-  if (cfg.worker_path)
+  if (cfg.worker_path || cfg.worker_code)
   {
     size_t workers_bytes = sizeof(thread_t) * cfg.max_workers;
 
