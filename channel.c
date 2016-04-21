@@ -129,35 +129,6 @@ channel_read (channel_t *channel)
   return msg;
 }
 
-int
-channel_try_read (channel_t *channel, void **res)
-{
-  int flag = 0;
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-
-  if (channel->backlog)
-  {
-    flag = 1;
-    channel->backlog--;
-
-    channel_node_t *node = channel->list;
-    channel->list = node->next;
-
-    *res = node->payload;
-
-    if (node == channel->last)
-      channel->last = NULL;
-
-    free(node);
-
-    if (channel->writers)
-      pthread_cond_signal(&channel->cond_write);
-  }
-
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return flag;
-}
-
 void
 channel_write (channel_t *channel, void *msg)
 {
