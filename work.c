@@ -33,25 +33,6 @@ work_accept (lua_State *lua)
 }
 
 int
-work_try_accept (lua_State *lua)
-{
-  message_t *message = NULL;
-
-  if (channel_try_read(&jobs, (void**)&message))
-  {
-    lua_pushboolean(lua, 1);
-    if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
-    self->result = message->result;
-    free(message->payload);
-    free(message);
-    return 2;
-  }
-
-  lua_pushboolean(lua, 0);
-  return 1;
-}
-
-int
 work_answer (lua_State *lua)
 {
   channel_write(self->result,
@@ -82,25 +63,6 @@ work_collect (lua_State *lua)
   char *payload = channel_read(&self->results);
   if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
   free(payload);
-  return 1;
-}
-
-int
-work_try_collect (lua_State *lua)
-{
-  ensure(cfg.worker_path || cfg.worker_code)
-    errorf("no workers");
-
-  char *payload = NULL;
-  if (channel_try_read(&self->results, (void**)&payload))
-  {
-    lua_pushboolean(lua, 1);
-    if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
-    free(payload);
-    return 2;
-  }
-
-  lua_pushboolean(lua, 0);
   return 1;
 }
 
