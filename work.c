@@ -39,11 +39,11 @@ work_try_accept (lua_State *lua)
 
   if (channel_try_read(&jobs, (void**)&message))
   {
+    lua_pushboolean(lua, 1);
     if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
     self->result = message->result;
     free(message->payload);
     free(message);
-    lua_pushboolean(lua, 1);
     return 2;
   }
 
@@ -94,8 +94,8 @@ work_try_collect (lua_State *lua)
   char *payload = NULL;
   if (channel_try_read(&self->results, (void**)&payload))
   {
-    if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
     lua_pushboolean(lua, 1);
+    if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
     free(payload);
     return 2;
   }
