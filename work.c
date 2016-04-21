@@ -66,7 +66,7 @@ work_submit (lua_State *lua)
     errorf("no workers");
 
   message_t *message = malloc(sizeof(message_t));
-  message->result = &self->results;
+  message->result = self->type == HANDLER ? &self->results: self->result;
   message->payload = lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL;
 
   channel_write(&jobs, message);

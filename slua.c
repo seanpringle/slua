@@ -90,6 +90,9 @@ lua_popnumber (lua_State *lua)
 #include "posix.c"
 #include "json.c"
 
+#define HANDLER 1
+#define WORKER 2
+
 #define MODE_TCP 1
 #define MODE_STDIN 2
 
@@ -112,6 +115,7 @@ typedef struct {
 config_t cfg;
 
 typedef struct {
+  int type;
   pthread_mutex_t mutex;
   int active;
   int done;
@@ -249,6 +253,7 @@ main_worker (void *ptr)
 {
   thread_t *worker = ptr;
   pthread_mutex_lock(&worker->mutex);
+  worker->type = WORKER;
 
   ensure(pthread_setspecific(key_self, worker) == 0)
     errorf("pthread_setspecific failed");
@@ -298,6 +303,7 @@ main_handler (void *ptr)
 {
   thread_t *handler = ptr;
   pthread_mutex_lock(&handler->mutex);
+  handler->type = HANDLER;
 
   ensure(pthread_setspecific(key_self, handler) == 0)
     errorf("pthread_setspecific failed");
