@@ -141,7 +141,7 @@ typedef struct {
   int io;
 } request_t;
 
-channel_t jobs, reqs;
+channel_t jobs, reqs, stuff;
 
 #include "work.c"
 #include "db.c"
@@ -369,6 +369,9 @@ main_handler (void *ptr)
 
   handler->done = 1;
   pthread_mutex_unlock(&handler->mutex);
+
+  if (cfg.mode == MODE_STDIN)
+    channel_write(&stuff, NULL);
 
   return NULL;
 }
@@ -623,17 +626,10 @@ main(int argc, char const *argv[])
   request->io = fileno(stdin);
   channel_write(&reqs, request);
 
-  thread_t thr;
-  memset(&thr, 0, sizeof(thread_t));
+  channel_init(&stuff, 0);
+  channel_read(&stuff);
 
-  ensure(pthread_mutex_init(&thr.mutex, NULL) == 0)
-    errorf("pthread_mutex_init failed");
-
-  thr.active = 1;
-
-  main_handler(&thr);
-
-  stop(thr.rc);
+  stop(handlers[0].rc);
 
   return EXIT_FAILURE;
 }
