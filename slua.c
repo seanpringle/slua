@@ -201,6 +201,7 @@ struct function_map registry_handler[] = {
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
   { .table = "work", .name = "backlog", .func = work_backlog },
+  { .table = "work", .name = "todo",    .func = work_todo    },
 };
 
 struct function_map registry_worker[] = {
@@ -213,6 +214,7 @@ struct function_map registry_worker[] = {
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
   { .table = "work", .name = "backlog", .func = work_backlog },
+  { .table = "work", .name = "todo",    .func = work_todo    },
 };
 
 void
@@ -378,6 +380,9 @@ main_handler (void *ptr)
     close_io(handler->lua);
     lua_close(handler->lua);
     db_close();
+
+    if (cfg.mode == MODE_STDIN)
+      break;
   }
 
   channel_free(&handler->results);
@@ -638,10 +643,17 @@ main(int argc, char const *argv[])
   request->io = fileno(stdin);
   channel_write(&reqs, request);
 
-  while (!channel_readers(&reqs) || channel_backlog(&reqs))
-    usleep(1000);
+  thread_t thr;
+  memset(&thr, 0, sizeof(thread_t));
 
-  stop(handlers[0].rc);
+  ensure(pthread_mutex_init(&thr.mutex, NULL) == 0)
+    errorf("pthread_mutex_init failed");
+
+  thr.active = 1;
+
+  main_handler(&thr);
+
+  stop(thr.rc);
 
   return EXIT_FAILURE;
 }

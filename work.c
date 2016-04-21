@@ -125,3 +125,13 @@ work_backlog (lua_State *lua)
   return 1;
 }
 
+int
+work_todo (lua_State *lua)
+{
+  ensure(pthread_mutex_lock(&jobs.mutex) == 0);
+  int backlog = jobs.backlog;
+  int readers = jobs.readers;
+  ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
+  lua_pushboolean(lua, backlog == 0 && readers == cfg.max_workers);
+  return 1;
+}
