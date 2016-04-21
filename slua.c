@@ -198,7 +198,7 @@ struct function_map registry_common[] = {
   { .table = "work",  .name = "pool",        .func = work_pool        },
   { .table = "work",  .name = "idle",        .func = work_idle        },
   { .table = "work",  .name = "backlog",     .func = work_backlog     },
-  { .table = "work",  .name = "queued",      .func = work_queued      },
+  { .table = "work",  .name = "unfinished",  .func = work_unfinished  },
 };
 
 void
