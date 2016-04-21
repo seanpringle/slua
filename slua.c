@@ -179,42 +179,26 @@ struct function_map {
 };
 
 struct function_map registry_common[] = {
-  { .table = "io",    .name = "stat",        .func = posix_stat   },
-  { .table = "io",    .name = "ls",          .func = posix_ls     },
-  { .table = "os",    .name = "usleep",      .func = posix_usleep },
-  { .table = "table", .name = "json_encode", .func = json_encode  },
-  { .table = "table", .name = "json_decode", .func = json_decode  },
-  { .table = "db",    .name = "read",        .func = db_read      },
-  { .table = "db",    .name = "write",       .func = db_write     },
-  { .table = "db",    .name = "escape",      .func = db_escape    },
-  { .table = NULL,    .name = "print",       .func = safe_print   },
-  { .table = NULL,    .name = "error",       .func = safe_error   },
-};
-
-struct function_map registry_handler[] = {
-  { .table = "work", .name = "submit",  .func = work_submit  },
-  { .table = "work", .name = "collect", .func = work_collect },
-  { .table = "work", .name = "accept",  .func = work_accept  },
-  { .table = "work", .name = "try_accept",  .func = work_try_accept  },
-  { .table = "work", .name = "answer",  .func = work_answer  },
-  { .table = "work", .name = "try_collect", .func = work_try_collect },
-  { .table = "work", .name = "pool",    .func = work_pool    },
-  { .table = "work", .name = "idle",    .func = work_idle    },
-  { .table = "work", .name = "backlog", .func = work_backlog },
-  { .table = "work", .name = "jobs",    .func = work_jobs    },
-};
-
-struct function_map registry_worker[] = {
-  { .table = "work", .name = "submit",  .func = work_submit  },
-  { .table = "work", .name = "collect", .func = work_collect },
-  { .table = "work", .name = "accept",  .func = work_accept  },
-  { .table = "work", .name = "try_accept",  .func = work_try_accept  },
-  { .table = "work", .name = "answer",  .func = work_answer  },
-  { .table = "work", .name = "try_collect", .func = work_try_collect },
-  { .table = "work", .name = "pool",    .func = work_pool    },
-  { .table = "work", .name = "idle",    .func = work_idle    },
-  { .table = "work", .name = "backlog", .func = work_backlog },
-  { .table = "work", .name = "jobs",    .func = work_jobs    },
+  { .table = "io",    .name = "stat",        .func = posix_stat       },
+  { .table = "io",    .name = "ls",          .func = posix_ls         },
+  { .table = "os",    .name = "usleep",      .func = posix_usleep     },
+  { .table = "table", .name = "json_encode", .func = json_encode      },
+  { .table = "table", .name = "json_decode", .func = json_decode      },
+  { .table = "db",    .name = "read",        .func = db_read          },
+  { .table = "db",    .name = "write",       .func = db_write         },
+  { .table = "db",    .name = "escape",      .func = db_escape        },
+  { .table = NULL,    .name = "print",       .func = safe_print       },
+  { .table = NULL,    .name = "error",       .func = safe_error       },
+  { .table = "work",  .name = "submit",      .func = work_submit      },
+  { .table = "work",  .name = "collect",     .func = work_collect     },
+  { .table = "work",  .name = "accept",      .func = work_accept      },
+  { .table = "work",  .name = "try_accept",  .func = work_try_accept  },
+  { .table = "work",  .name = "answer",      .func = work_answer      },
+  { .table = "work",  .name = "try_collect", .func = work_try_collect },
+  { .table = "work",  .name = "pool",        .func = work_pool        },
+  { .table = "work",  .name = "idle",        .func = work_idle        },
+  { .table = "work",  .name = "backlog",     .func = work_backlog     },
+  { .table = "work",  .name = "queued",      .func = work_queued      },
 };
 
 void
@@ -284,7 +268,6 @@ main_worker (void *ptr)
   lua_setglobal(worker->lua, "work");
 
   lua_functions(worker->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
-  lua_functions(worker->lua, registry_worker, sizeof(registry_worker) / sizeof(struct function_map));
 
   if ( (cfg.worker_path && luaL_dofile(worker->lua,   cfg.worker_path) != 0)
     || (cfg.worker_code && luaL_dostring(worker->lua, cfg.worker_code) != 0))
@@ -368,7 +351,6 @@ main_handler (void *ptr)
     lua_setglobal(handler->lua, "work");
 
     lua_functions(handler->lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
-    lua_functions(handler->lua, registry_handler, sizeof(registry_handler) / sizeof(struct function_map));
 
     if ( (cfg.handler_path && luaL_dofile(handler->lua,   cfg.handler_path) != 0)
       || (cfg.handler_code && luaL_dostring(handler->lua, cfg.handler_code) != 0))

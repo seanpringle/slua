@@ -126,7 +126,7 @@ work_backlog (lua_State *lua)
 }
 
 int
-work_jobs (lua_State *lua)
+work_queued (lua_State *lua)
 {
   ensure(pthread_mutex_lock(&jobs.mutex) == 0);
   int count = channel_backlog(&self->results);
