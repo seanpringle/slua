@@ -200,6 +200,7 @@ struct function_map registry_handler[] = {
   { .table = "work", .name = "try_collect", .func = work_try_collect },
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
+  { .table = "work", .name = "backlog", .func = work_backlog },
 };
 
 struct function_map registry_worker[] = {
@@ -211,6 +212,7 @@ struct function_map registry_worker[] = {
   { .table = "work", .name = "try_collect", .func = work_try_collect },
   { .table = "work", .name = "pool",    .func = work_pool    },
   { .table = "work", .name = "idle",    .func = work_idle    },
+  { .table = "work", .name = "backlog", .func = work_backlog },
 };
 
 void

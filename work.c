@@ -118,3 +118,10 @@ work_idle (lua_State *lua)
   return 1;
 }
 
+int
+work_backlog (lua_State *lua)
+{
+  lua_pushnumber(lua, channel_backlog(&jobs));
+  return 1;
+}
+
