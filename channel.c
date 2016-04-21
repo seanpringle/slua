@@ -91,15 +91,6 @@ channel_readers (channel_t *channel)
   return readers;
 }
 
-size_t
-channel_writers (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  size_t writers = channel->writers;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return writers;
-}
-
 void*
 channel_read (channel_t *channel)
 {
