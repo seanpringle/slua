@@ -175,15 +175,16 @@ struct function_map {
 };
 
 struct function_map registry_common[] = {
-  { .table = "io",    .name = "stat",        .func = posix_stat  },
-  { .table = "io",    .name = "ls",          .func = posix_ls    },
-  { .table = "table", .name = "json_encode", .func = json_encode },
-  { .table = "table", .name = "json_decode", .func = json_decode },
-  { .table = "db",    .name = "read",        .func = db_read     },
-  { .table = "db",    .name = "write",       .func = db_write    },
-  { .table = "db",    .name = "escape",      .func = db_escape   },
-  { .table = NULL,    .name = "print",       .func = safe_print  },
-  { .table = NULL,    .name = "error",       .func = safe_error  },
+  { .table = "io",    .name = "stat",        .func = posix_stat   },
+  { .table = "io",    .name = "ls",          .func = posix_ls     },
+  { .table = "os",    .name = "usleep",      .func = posix_usleep },
+  { .table = "table", .name = "json_encode", .func = json_encode  },
+  { .table = "table", .name = "json_decode", .func = json_decode  },
+  { .table = "db",    .name = "read",        .func = db_read      },
+  { .table = "db",    .name = "write",       .func = db_write     },
+  { .table = "db",    .name = "escape",      .func = db_escape    },
+  { .table = NULL,    .name = "print",       .func = safe_print   },
+  { .table = NULL,    .name = "error",       .func = safe_error   },
 };
 
 struct function_map registry_handler[] = {

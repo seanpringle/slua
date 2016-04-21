@@ -190,3 +190,10 @@ posix_stat (lua_State *lua)
   }
   return 1;
 }
+
+int
+posix_usleep (lua_State *lua)
+{
+  usleep(lua_popnumber(lua));
+  return 0;
+}
