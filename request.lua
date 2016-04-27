@@ -33,7 +33,7 @@ work.submit("hello")
 print(work.collect())
 
 t = { hello = "world", "snaffle", 3.14, 1.0, { "what", "the", "heck?" } }
-s = table.json_encode(t)
+s = table.json_encode(t, "world")
 
 print(s)
 tt = table.json_decode(s)

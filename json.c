@@ -24,6 +24,15 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 int
 json_encode (lua_State *lua)
 {
+  char *null_str = NULL;
+
+  if (lua_gettop(lua) == 2)
+  {
+    if (lua_type(lua, -1) == LUA_TSTRING)
+      null_str = strdup(lua_tostring(lua, -1));
+    lua_pop(lua, 1);
+  }
+
   // check for array
   int table_length = 0;
   int has_strings = 0;
@@ -85,6 +94,10 @@ json_encode (lua_State *lua)
 
         case LUA_TSTRING:
           val = str_quote((char*)lua_tostring(lua, -1));
+
+          if (null_str && str_eq(null_str, (char*)lua_tostring(lua, -1)))
+            val = strdup("null");
+
           break;
 
         case LUA_TTABLE:
@@ -120,6 +133,7 @@ json_encode (lua_State *lua)
   lua_pop(lua, 1);
   lua_pushstring(lua, json);
   free(json);
+  free(null_str);
 
   return 1;
 }
@@ -172,6 +186,7 @@ json_decode_step (lua_State *lua, char *json, int mode)
 
       case 'n':
         lua_pushnil(lua);
+        while (json && *json && !strchr(", \t\r\n", *json)) json++;
         pushed++;
         break;
 
