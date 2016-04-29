@@ -82,7 +82,7 @@ posix_stat (lua_State *lua)
     if (st.st_mode & S_IWOTH) mode[i] = 'w'; i++;
     if (st.st_mode & S_IXOTH) mode[i] = 'x'; i++;
 
-    int gsize = (int) sysconf(_SC_GETGR_R_SIZE_MAX);
+    int gsize = max(8192, (int) sysconf(_SC_GETGR_R_SIZE_MAX));
     char *gbuff = malloc(gsize);
     struct group _grp, *grp = &_grp;
 
@@ -91,7 +91,7 @@ posix_stat (lua_State *lua)
     if (grs != 0)
       errorf("getgrgid_r %s %d", path, grs);
 
-    int psize = (int) sysconf(_SC_GETPW_R_SIZE_MAX);
+    int psize = max(8192, (int) sysconf(_SC_GETPW_R_SIZE_MAX));
     char *pbuff = malloc(psize);
     struct passwd _pwd, *pwd = &_pwd;
 
