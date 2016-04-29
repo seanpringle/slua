@@ -72,6 +72,7 @@ channel_free (channel_t *channel)
     pthread_mutex_destroy(&channel->mutex);
     pthread_cond_destroy(&channel->cond_read);
     pthread_cond_destroy(&channel->cond_write);
+    pthread_cond_destroy(&channel->cond_active);
     free(channel->list);
     channel->used = 0;
   }
@@ -102,12 +103,12 @@ channel_read (channel_t *channel)
   channel->readers++;
 
   int waited = 0;
-  pthread_cond_broadcast(&channel->cond_active);
+  ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   while (channel->backlog == 0)
   {
     waited = 1;
-    pthread_cond_wait(&channel->cond_read, &channel->mutex);
+    ensure(pthread_cond_wait(&channel->cond_read, &channel->mutex) == 0);
   }
 
   channel->backlog--;
@@ -123,10 +124,10 @@ channel_read (channel_t *channel)
   free(node);
 
   if (channel->writers)
-    pthread_cond_signal(&channel->cond_write);
+    ensure(pthread_cond_signal(&channel->cond_write) == 0);
 
   if (waited)
-    pthread_cond_broadcast(&channel->cond_active);
+    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   channel->readers--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
@@ -140,12 +141,12 @@ channel_write (channel_t *channel, void *msg)
   channel->writers++;
 
   int waited = 0;
-  pthread_cond_broadcast(&channel->cond_active);
+  ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   while (channel->limit > 0 && channel->backlog == channel->limit)
   {
     waited = 1;
-    pthread_cond_wait(&channel->cond_write, &channel->mutex);
+    ensure(pthread_cond_wait(&channel->cond_write, &channel->mutex) == 0);
   }
 
   channel->backlog++;
@@ -166,10 +167,10 @@ channel_write (channel_t *channel, void *msg)
   }
 
   if (channel->readers)
-    pthread_cond_signal(&channel->cond_read);
+    ensure(pthread_cond_signal(&channel->cond_read) == 0);
 
   if (waited)
-    pthread_cond_broadcast(&channel->cond_active);
+    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   channel->writers--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
@@ -181,7 +182,7 @@ channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, si
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->waiters++;
 
-  pthread_cond_broadcast(&channel->cond_active);
+  ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   if (usec)
   {
