@@ -30,28 +30,32 @@ typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t cond_read;
   pthread_cond_t cond_write;
+  pthread_cond_t cond_idle;
   channel_node_t *list;
   channel_node_t *last;
   size_t limit;
   size_t backlog;
   size_t readers;
   size_t writers;
+  size_t workers;
   int used;
 } channel_t;
 
 void
-channel_init (channel_t *channel, size_t limit)
+channel_init (channel_t *channel, size_t limit, size_t workers)
 {
   channel->used = 1;
   channel->backlog = 0;
   channel->readers = 0;
   channel->writers = 0;
+  channel->workers = 0;
   channel->limit = limit;
   channel->list = NULL;
   channel->last = NULL;
   ensure(pthread_mutex_init(&channel->mutex, NULL) == 0);
   ensure(pthread_cond_init(&channel->cond_read, NULL) == 0);
   ensure(pthread_cond_init(&channel->cond_write, NULL) == 0);
+  ensure(pthread_cond_init(&channel->cond_idle, NULL) == 0);
 }
 
 void
@@ -96,6 +100,9 @@ channel_read (channel_t *channel)
 {
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->readers++;
+
+  if (channel->workers > 0 && channel->workers == channel->readers)
+    pthread_cond_broadcast(&channel->cond_idle);
 
   while (channel->backlog == 0)
     pthread_cond_wait(&channel->cond_read, &channel->mutex);
