@@ -98,13 +98,17 @@ work_backlog (lua_State *lua)
 int
 work_unfinished (lua_State *lua)
 {
+  int unfinished = 0;
+
   ensure(pthread_mutex_lock(&self->results.mutex) == 0);
   ensure(pthread_mutex_lock(&jobs.mutex) == 0);
-  int count = self->results.backlog;
-  count += jobs.backlog;
-  count += (cfg.max_workers - jobs.readers);
+  
+  if (self->results.backlog > 0 || jobs.backlog > 0 || jobs.readers < cfg.max_workers)
+    unfinished = 1;
+
   ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
   ensure(pthread_mutex_unlock(&self->results.mutex) == 0);
-  lua_pushnumber(lua, count);
+
+  lua_pushboolean(lua, unfinished);
   return 1;
 }
