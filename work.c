@@ -98,6 +98,8 @@ work_backlog (lua_State *lua)
 int
 work_unfinished (lua_State *lua)
 {
+  size_t readers, writers, backlog;
+
   if (channel_backlog(&self->results) > 0)
   {
     lua_pushboolean(lua, 1);
@@ -106,28 +108,18 @@ work_unfinished (lua_State *lua)
 
   for (;;)
   {
-    ensure(pthread_mutex_lock(&jobs.mutex) == 0);
+    channel_wait(&jobs, 100000, &backlog, &readers, &writers);
 
-    if (channel_backlog(&self->results) > 0 || jobs.backlog > 0)
+    if (backlog > 0 || channel_backlog(&self->results) > 0)
     {
-      ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
       lua_pushboolean(lua, 1);
       return 1;
     }
 
-    if (jobs.readers < jobs.workers)
+    if (readers == cfg.max_workers)
     {
-      struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);
-      ts.tv_sec += 1;
-      int rc = pthread_cond_timedwait(&jobs.cond_idle, &jobs.mutex, &ts);
-      ensure(rc == 0 || rc == ETIMEDOUT);
-      ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
-      continue;
+      lua_pushboolean(lua, 0);
+      return 1;
     }
-
-    ensure(pthread_mutex_unlock(&jobs.mutex) == 0);
-    lua_pushboolean(lua, 0);
-    return 1;
   }
 }

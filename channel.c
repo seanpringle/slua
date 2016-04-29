@@ -30,32 +30,32 @@ typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t cond_read;
   pthread_cond_t cond_write;
-  pthread_cond_t cond_idle;
+  pthread_cond_t cond_active;
   channel_node_t *list;
   channel_node_t *last;
   size_t limit;
   size_t backlog;
   size_t readers;
   size_t writers;
-  size_t workers;
+  size_t waiters;
   int used;
 } channel_t;
 
 void
-channel_init (channel_t *channel, size_t limit, size_t workers)
+channel_init (channel_t *channel, size_t limit)
 {
   channel->used = 1;
   channel->backlog = 0;
   channel->readers = 0;
   channel->writers = 0;
-  channel->workers = 0;
+  channel->waiters = 0;
   channel->limit = limit;
   channel->list = NULL;
   channel->last = NULL;
   ensure(pthread_mutex_init(&channel->mutex, NULL) == 0);
   ensure(pthread_cond_init(&channel->cond_read, NULL) == 0);
   ensure(pthread_cond_init(&channel->cond_write, NULL) == 0);
-  ensure(pthread_cond_init(&channel->cond_idle, NULL) == 0);
+  ensure(pthread_cond_init(&channel->cond_active, NULL) == 0);
 }
 
 void
@@ -101,11 +101,14 @@ channel_read (channel_t *channel)
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->readers++;
 
-  if (channel->workers > 0 && channel->workers == channel->readers)
-    pthread_cond_broadcast(&channel->cond_idle);
+  int waited = 0;
+  pthread_cond_broadcast(&channel->cond_active);
 
   while (channel->backlog == 0)
+  {
+    waited = 1;
     pthread_cond_wait(&channel->cond_read, &channel->mutex);
+  }
 
   channel->backlog--;
 
@@ -122,6 +125,9 @@ channel_read (channel_t *channel)
   if (channel->writers)
     pthread_cond_signal(&channel->cond_write);
 
+  if (waited)
+    pthread_cond_broadcast(&channel->cond_active);
+
   channel->readers--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
   return msg;
@@ -133,8 +139,14 @@ channel_write (channel_t *channel, void *msg)
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
 
+  int waited = 0;
+  pthread_cond_broadcast(&channel->cond_active);
+
   while (channel->limit > 0 && channel->backlog == channel->limit)
+  {
+    waited = 1;
     pthread_cond_wait(&channel->cond_write, &channel->mutex);
+  }
 
   channel->backlog++;
 
@@ -156,6 +168,55 @@ channel_write (channel_t *channel, void *msg)
   if (channel->readers)
     pthread_cond_signal(&channel->cond_read);
 
+  if (waited)
+    pthread_cond_broadcast(&channel->cond_active);
+
   channel->writers--;
+  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
+}
+
+void
+channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, size_t *writers)
+{
+  ensure(pthread_mutex_lock(&channel->mutex) == 0);
+  channel->waiters++;
+
+  pthread_cond_broadcast(&channel->cond_active);
+
+  if (usec)
+  {
+    struct timespec ts;
+    int nsec = usec * 1000;
+    clock_gettime(CLOCK_REALTIME, &ts);
+
+    if (ts.tv_nsec + nsec > 1000000000)
+    {
+      ts.tv_sec += 1;
+      ts.tv_nsec = nsec - (1000000000 - ts.tv_nsec);
+    }
+    else
+    {
+      ts.tv_nsec += nsec;
+    }
+
+    int rc = pthread_cond_timedwait(&channel->cond_active, &channel->mutex, &ts);
+    ensure(rc == 0 || rc == ETIMEDOUT);
+  }
+  else
+  {
+    int rc = pthread_cond_wait(&channel->cond_active, &channel->mutex);
+    ensure(rc == 0);
+  }
+
+  if (backlog)
+    *backlog = channel->backlog;
+  
+  if (readers)
+    *readers = channel->readers;
+  
+  if (writers)
+    *writers = channel->writers;
+  
+  channel->waiters--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
 }

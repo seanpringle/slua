@@ -301,7 +301,7 @@ main_handler (void *ptr)
   ensure(pthread_setspecific(key_self, handler) == 0)
     errorf("pthread_setspecific failed");
 
-  channel_init(&handler->results, cfg.max_results, 0);
+  channel_init(&handler->results, cfg.max_results);
 
   request_t *request = NULL;
 
@@ -539,7 +539,7 @@ start(int argc, const char *argv[])
 
   memset(handlers, 0, handlers_bytes);
 
-  channel_init(&reqs, cfg.max_handlers, 0);
+  channel_init(&reqs, cfg.max_handlers);
 
   for (size_t ri = 0; ri < cfg.max_handlers; ri++)
   {
@@ -554,7 +554,7 @@ start(int argc, const char *argv[])
       errorf("pthread_create failed");
   }
 
-  channel_init(&jobs, cfg.max_jobs, cfg.max_workers);
+  channel_init(&jobs, cfg.max_jobs);
 
   if (cfg.worker_path || cfg.worker_code)
   {
@@ -636,7 +636,7 @@ main(int argc, char const *argv[])
   request->io = fileno(stdin);
   channel_write(&reqs, request);
 
-  channel_init(&stuff, 0, 0);
+  channel_init(&stuff, 0);
   channel_read(&stuff);
 
   stop(handlers[0].rc);
