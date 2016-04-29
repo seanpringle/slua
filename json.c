@@ -96,7 +96,10 @@ json_encode (lua_State *lua)
           val = str_quote((char*)lua_tostring(lua, -1));
 
           if (null_str && str_eq(null_str, (char*)lua_tostring(lua, -1)))
+          {
+            free(val);
             val = strdup("null");
+          }
 
           break;
 
