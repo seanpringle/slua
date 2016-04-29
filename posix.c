@@ -88,11 +88,17 @@ posix_stat (lua_State *lua)
 
     int grs = getgrgid_r(st.st_gid, grp, gbuff, gsize, &grp);
 
+    if (grs != 0)
+      errorf("getgrgid_r %s %d", path, grs);
+
     int psize = (int) sysconf(_SC_GETPW_R_SIZE_MAX);
     char *pbuff = malloc(psize);
     struct passwd _pwd, *pwd = &_pwd;
 
     int prs = getpwuid_r(st.st_uid, pwd, pbuff, psize, &pwd);
+
+    if (prs != 0)
+      errorf("getpwuid_r %s %d", path, prs);
 
     lua_createtable(lua, 0, 0);
 
