@@ -27,16 +27,14 @@ work_accept (lua_State *lua)
   message_t *message = channel_read(&jobs);
   if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
   self->result = message->result;
-  free(self->payload);
-  self->payload = message->payload;
-  free(message);
-  return 1;
-}
 
-int
-work_current (lua_State *lua)
-{
-  if (self->payload) lua_pushstring(lua, self->payload); else lua_pushnil(lua);
+  lua_getglobal(lua, "work");
+  lua_pushstring(lua, "job");
+  if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
+  lua_settable(lua, -3);
+  lua_pop(lua, 1);
+
+  free(message);
   return 1;
 }
 
@@ -96,7 +94,7 @@ work_backlog (lua_State *lua)
 }
 
 int
-work_unfinished (lua_State *lua)
+work_active (lua_State *lua)
 {
   size_t readers, writers, backlog;
 
