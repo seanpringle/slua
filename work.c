@@ -34,6 +34,7 @@ work_accept (lua_State *lua)
   lua_settable(lua, -3);
   lua_pop(lua, 1);
 
+  free(message->payload);
   free(message);
   return 1;
 }
