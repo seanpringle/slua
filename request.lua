@@ -42,12 +42,13 @@ print(tt["4"][2])
 t = { "world", "snaffle", 3.14, 1.0, "what" }
 s = table.json_encode(t)
 
-error(s)
+eprint(s)
 
 for k,v in pairs(table.json_decode(s)) do
   print(k.." => "..v)
 end
 
+print(type(client))
 
 print(1,2,3)
 

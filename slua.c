@@ -191,7 +191,7 @@ struct function_map registry_common[] = {
   { .table = "db",    .name = "write",       .func = db_write         },
   { .table = "db",    .name = "escape",      .func = db_escape        },
   { .table = NULL,    .name = "print",       .func = safe_print       },
-  { .table = NULL,    .name = "error",       .func = safe_error       },
+  { .table = NULL,    .name = "eprint",      .func = safe_error       },
   { .table = "work",  .name = "submit",      .func = work_submit      },
   { .table = "work",  .name = "accept",      .func = work_accept      },
   { .table = "work",  .name = "answer",      .func = work_answer      },
