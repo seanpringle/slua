@@ -141,6 +141,7 @@ typedef struct {
 
 typedef struct {
   int io;
+  char *ipv4;
 } request_t;
 
 channel_t jobs, reqs, stuff;
@@ -305,7 +306,6 @@ main_handler (void *ptr)
   while ((request = channel_read(&reqs)))
   {
     handler->io = request->io;
-    free(request);
 
     ensure((handler->lua = luaL_newstate()))
       errorf("luaL_newstate failed");
@@ -317,6 +317,11 @@ main_handler (void *ptr)
     ensure(handler->fio)
       errorf("fdopen failed");
 
+    handler->rc = EXIT_SUCCESS;
+
+    lua_createtable(handler->lua, 0, 0);
+    lua_pushstring(handler->lua, "sock");
+
   #ifdef LUA51
     FILE **fio = lua_newuserdata(handler->lua, sizeof(FILE*));
     *fio = handler->fio;
@@ -326,7 +331,6 @@ main_handler (void *ptr)
     lua_pushcfunction(handler->lua, close_io);
     lua_setfield(handler->lua, -2, "__close");
     lua_setfenv(handler->lua, -2);
-    lua_setglobal(handler->lua, "sock");
   #endif
 
   #ifdef LUA52
@@ -334,10 +338,14 @@ main_handler (void *ptr)
     s->f = handler->fio;
     s->closef = close_io;
     luaL_setmetatable(handler->lua, LUA_FILEHANDLE);
-    lua_setglobal(handler->lua, "sock");
   #endif
 
-    handler->rc = EXIT_SUCCESS;
+    // sock
+    lua_settable(handler->lua, -3);
+    lua_pushstring(handler->lua, "ip");
+    if (request->ipv4) lua_pushstring(handler->lua, request->ipv4); else lua_pushnil(handler->lua);
+    lua_settable(handler->lua, -3);
+    lua_setglobal(handler->lua, "client");
 
     db_open();
 
@@ -369,6 +377,9 @@ main_handler (void *ptr)
 
     if (cfg.mode == MODE_STDIN)
       break;
+
+    free(request->ipv4);
+    free(request);
   }
 
   channel_free(&handler->results);
@@ -615,11 +626,17 @@ main(int argc, char const *argv[])
     }
 
     int fd;
+    struct sockaddr caddr;
+    socklen_t clen;
 
-    while ((fd = accept(sock_fd, NULL, NULL)) && fd >= 0)
+    while ((fd = accept(sock_fd, &caddr, &clen)) && fd >= 0)
     {
       request_t *request = malloc(sizeof(request_t));
       request->io = fd;
+
+      char *ipv4 = malloc(16);
+      request->ipv4 = (char*)inet_ntop(AF_INET, &caddr, ipv4, 16);
+      if (!request->ipv4) free(ipv4);
 
       channel_write(&reqs, request);
     }
@@ -630,6 +647,7 @@ main(int argc, char const *argv[])
   // MODE_STDIN
   request_t *request = malloc(sizeof(request_t));
   request->io = fileno(stdin);
+  request->ipv4 = NULL;
   channel_write(&reqs, request);
 
   channel_init(&stuff, 0);
