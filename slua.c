@@ -633,6 +633,7 @@ main(int argc, char const *argv[])
     {
       request_t *request = malloc(sizeof(request_t));
       request->io = fd;
+      request->ipv4 = NULL;
 
       char *ipv4 = malloc(16);
       request->ipv4 = (char*)inet_ntop(AF_INET, &caddr, ipv4, 16);
