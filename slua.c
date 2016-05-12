@@ -185,6 +185,7 @@ struct function_map {
 struct function_map registry_common[] = {
   { .table = "io",    .name = "stat",        .func = posix_stat       },
   { .table = "io",    .name = "ls",          .func = posix_ls         },
+  { .table = "os",    .name = "usleep",      .func = posix_usleep     },
   { .table = "table", .name = "json_encode", .func = json_encode      },
   { .table = "table", .name = "json_decode", .func = json_decode      },
   { .table = "db",    .name = "read",        .func = db_read          },
@@ -497,6 +498,18 @@ start(int argc, const char *argv[])
     {
       ensure(argi < argc-1) errorf("expected (-db|--database) <value>");
       cfg.db_path = argv[++argi];
+      continue;
+    }
+    if (str_eq(argv[argi], "-mj") || str_eq(argv[argi], "--max-jobs"))
+    {
+      ensure(argi < argc-1) errorf("expected (-mj|--max-jobs) <value>");
+      cfg.max_jobs = strtol(argv[++argi], NULL, 0);
+      continue;
+    }
+    if (str_eq(argv[argi], "-mr") || str_eq(argv[argi], "--max-results"))
+    {
+      ensure(argi < argc-1) errorf("expected (-mr|--max-results) <value>");
+      cfg.max_results = strtol(argv[++argi], NULL, 0);
       continue;
     }
 
