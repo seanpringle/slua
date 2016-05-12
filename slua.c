@@ -91,6 +91,7 @@ lua_popnumber (lua_State *lua)
 #include "channel.c"
 #include "posix.c"
 #include "json.c"
+#include "pcre.c"
 
 #define HANDLER 1
 #define WORKER 2
@@ -188,6 +189,7 @@ struct function_map registry_common[] = {
   { .table = "os",    .name = "usleep",      .func = posix_usleep     },
   { .table = "table", .name = "json_encode", .func = json_encode      },
   { .table = "table", .name = "json_decode", .func = json_decode      },
+  { .table = "string",.name = "pcre_match",  .func = pcre_match       },
   { .table = "db",    .name = "read",        .func = db_read          },
   { .table = "db",    .name = "write",       .func = db_write         },
   { .table = "db",    .name = "escape",      .func = db_escape        },

@@ -52,3 +52,8 @@ print(type(client))
 
 print(1,2,3)
 
+local m, a, b = string.pcre_match("hello world", "^([^ ]+) (.+)")
+
+print(m)
+print(a)
+print(b)
