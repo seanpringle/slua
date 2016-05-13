@@ -42,6 +42,7 @@ pcre_match(lua_State *lua)
     return 1;
   }
 
+#ifdef PCRE_STUDY_JIT_COMPILE
   error = NULL;
   extra = pcre_study(re, PCRE_STUDY_JIT_COMPILE, &error);
 
@@ -51,6 +52,7 @@ pcre_match(lua_State *lua)
     lua_pushnil(lua);
     return 1;
   }
+#endif
 
   int matches = pcre_exec(re, extra, subject, strlen(subject), 0, 0, ovector, sizeof(ovector));
 
