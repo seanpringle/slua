@@ -291,6 +291,9 @@ struct function_map registry_common[] = {
   { .table = "work",  .name = "backlog",     .func = work_backlog     },
   { .table = "string",.name = "md5",         .func = hash_md5         },
   { .table = "string",.name = "sha1",        .func = hash_sha1        },
+  { .table = "string",.name = "sha256",      .func = hash_sha256      },
+  { .table = "string",.name = "sha512",      .func = hash_sha512      },
+  { .table = "string",.name = "epoch",       .func = posix_strtotime  },
 };
 
 struct function_map registry_handler[] = {

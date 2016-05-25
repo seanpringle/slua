@@ -54,3 +54,35 @@ hash_sha1 (lua_State *lua)
   lua_pushstring(lua, hstr);
   return 1;
 }
+
+int
+hash_sha256 (lua_State *lua)
+{
+  unsigned char digest[SHA256_DIGEST_LENGTH];
+  const char *str = lua_popstring(lua);
+
+  SHA256((unsigned char*)str, strlen(str), digest);
+
+  char hstr[SHA256_DIGEST_LENGTH*2+1];
+  for(int i = 0; i < SHA256_DIGEST_LENGTH; ++i)
+    sprintf(&hstr[i*2], "%02x", (unsigned int)digest[i]);
+
+  lua_pushstring(lua, hstr);
+  return 1;
+}
+
+int
+hash_sha512 (lua_State *lua)
+{
+  unsigned char digest[SHA512_DIGEST_LENGTH];
+  const char *str = lua_popstring(lua);
+
+  SHA512((unsigned char*)str, strlen(str), digest);
+
+  char hstr[SHA512_DIGEST_LENGTH*2+1];
+  for(int i = 0; i < SHA512_DIGEST_LENGTH; ++i)
+    sprintf(&hstr[i*2], "%02x", (unsigned int)digest[i]);
+
+  lua_pushstring(lua, hstr);
+  return 1;
+}
