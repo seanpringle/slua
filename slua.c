@@ -258,10 +258,7 @@ request_write (lua_State *lua)
   if (bytes < 0)
     lua_pushnil(lua);
   else
-  {
-    write(self->request->io, "\n", 1);
-    lua_pushnumber(lua, bytes+1);
-  }
+    lua_pushnumber(lua, bytes);
   return 1;
 }
 
