@@ -286,14 +286,14 @@ struct function_map registry_common[] = {
   { .table = "work",  .name = "pool",        .func = work_pool        },
   { .table = "work",  .name = "idle",        .func = work_idle        },
   { .table = "work",  .name = "backlog",     .func = work_backlog     },
-  { .table = "client",.name = "read",        .func = request_read     },
-  { .table = "client",.name = "read_line",   .func = request_read_line},
-  { .table = "client",.name = "write",       .func = request_write    },
 };
 
 struct function_map registry_handler[] = {
   { .table = "work",  .name = "collect",     .func = work_collect     },
   { .table = "work",  .name = "active",      .func = work_active      },
+  { .table = "client",.name = "read",        .func = request_read     },
+  { .table = "client",.name = "read_line",   .func = request_read_line},
+  { .table = "client",.name = "write",       .func = request_write    },
 };
 
 void
