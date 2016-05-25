@@ -203,11 +203,10 @@ request_read (lua_State *lua)
   }
 
   buffer[length] = 0;
-  lua_pushboolean(lua, ok);
-  lua_pushstring(lua, buffer);
+  if (ok) lua_pushstring(lua, buffer); else lua_pushnil(lua);
 
   free(buffer);
-  return 2;
+  return 1;
 }
 
 int
@@ -235,10 +234,13 @@ request_read_line (lua_State *lua)
     lua_concat(lua, 2);
   }
 
-  lua_pushboolean(lua, ok);
-  lua_insert(lua, -2);
+  if (!ok)
+  {
+    lua_pop(lua, 1);
+    lua_pushnil(lua);
+  }
 
-  return 2;
+  return 1;
 }
 
 int
