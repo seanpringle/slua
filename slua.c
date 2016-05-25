@@ -119,6 +119,7 @@ typedef struct {
   const char *db_path;
   const char *ssl_cert;
   const char *ssl_key;
+  SSL_CTX *ssl_ctx;
 } config_t;
 
 config_t cfg;
@@ -132,7 +133,6 @@ typedef struct {
   int io;
   char *ipv4;
   SSL *ssl;
-  SSL_CTX *ssl_ctx;
 } request_t;
 
 typedef struct {
@@ -390,18 +390,10 @@ main_handler (void *ptr)
 
     if (cfg.ssl_cert && cfg.ssl_key)
     {
-      request->ssl_ctx = SSL_CTX_new(SSLv23_server_method());
-      ensure(request->ssl_ctx) errorf("SSL_CTX_new failed");
-      SSL_CTX_set_options(request->ssl_ctx, SSL_OP_SINGLE_DH_USE);
-
-      ensure(SSL_CTX_use_certificate_file(request->ssl_ctx, cfg.ssl_cert, SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_certificate_file failed %s", cfg.ssl_cert);
-      ensure(SSL_CTX_use_PrivateKey_file(request->ssl_ctx,  cfg.ssl_key,  SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_PrivateKey_file failed %s",  cfg.ssl_key);
-
-      request->ssl = SSL_new(request->ssl_ctx);
+      request->ssl = SSL_new(cfg.ssl_ctx);
       ensure(request->ssl) errorf("SSL_new failed");
 
       SSL_set_fd(request->ssl, request->io);
-
       int ssl_err = SSL_accept(request->ssl);
 
       if (ssl_err <= 0)
@@ -462,7 +454,6 @@ main_handler (void *ptr)
     {
       SSL_shutdown(request->ssl);
       SSL_free(request->ssl);
-      SSL_CTX_free(request->ssl_ctx);
     }
 
     close(request->io);
@@ -529,6 +520,7 @@ start(int argc, const char *argv[])
   cfg.db_path      = NULL;
   cfg.ssl_cert     = NULL;
   cfg.ssl_key      = NULL;
+  cfg.ssl_ctx      = NULL;
 
   signal(SIGINT,  sig_int);
   signal(SIGTERM, sig_term);
@@ -741,6 +733,13 @@ main(int argc, char const *argv[])
 
       CRYPTO_set_id_callback(ssl_thread_id);
       CRYPTO_set_locking_callback(ssl_lock);
+
+      cfg.ssl_ctx = SSL_CTX_new(SSLv23_server_method());
+      ensure(cfg.ssl_ctx) errorf("SSL_CTX_new failed");
+      SSL_CTX_set_options(cfg.ssl_ctx, SSL_OP_SINGLE_DH_USE);
+
+      ensure(SSL_CTX_use_certificate_file(cfg.ssl_ctx, cfg.ssl_cert, SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_certificate_file failed %s", cfg.ssl_cert);
+      ensure(SSL_CTX_use_PrivateKey_file(cfg.ssl_ctx,  cfg.ssl_key,  SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_PrivateKey_file failed %s",  cfg.ssl_key);
     }
 
     int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
@@ -789,7 +788,6 @@ main(int argc, char const *argv[])
         request->io = fd;
         request->ipv4 = NULL;
         request->ssl = NULL;
-        request->ssl_ctx = NULL;
 
         char *ipv4 = malloc(16);
         request->ipv4 = (char*)inet_ntop(AF_INET, &caddr, ipv4, 16);
