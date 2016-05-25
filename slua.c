@@ -47,6 +47,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <errno.h>
 #include <time.h>
 
+#include <openssl/bio.h>
+#include <openssl/ssl.h>
+#include <openssl/err.h>
+
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
 #define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
 
@@ -113,27 +117,11 @@ typedef struct {
   size_t max_jobs;
   size_t max_results;
   const char *db_path;
+  const char *ssl_cert;
+  const char *ssl_key;
 } config_t;
 
 config_t cfg;
-
-typedef struct {
-  int type;
-  pthread_mutex_t mutex;
-  int active;
-  int done;
-  int rc;
-  int io;
-  FILE *fio;
-  pthread_t thread;
-  lua_State *lua;
-  channel_t results;
-  channel_t *result;
-  sqlite3 *db;
-} thread_t;
-
-thread_t *workers;
-thread_t *handlers;
 
 typedef struct {
   char *payload;
@@ -143,7 +131,26 @@ typedef struct {
 typedef struct {
   int io;
   char *ipv4;
+  SSL *ssl;
+  SSL_CTX *ssl_ctx;
 } request_t;
+
+typedef struct {
+  int type;
+  pthread_mutex_t mutex;
+  int active;
+  int done;
+  int rc;
+  request_t *request;
+  pthread_t thread;
+  lua_State *lua;
+  channel_t results;
+  channel_t *result;
+  sqlite3 *db;
+} thread_t;
+
+thread_t *workers;
+thread_t *handlers;
 
 channel_t jobs, reqs, stuff;
 pthread_cond_t all_workers_idle;
@@ -177,6 +184,73 @@ safe_error (lua_State *lua)
   return 0;
 }
 
+int
+request_read (lua_State *lua)
+{
+  int ok = 1;
+  size_t length = 0;
+  size_t limit = lua_popnumber(lua);
+  char *buffer = malloc(limit+1);
+
+  while (length < limit)
+  {
+    size_t bytes = self->request->ssl
+      ? SSL_read(self->request->ssl,  buffer + length, limit - length)
+      : read(self->request->io, buffer + length, limit - length);
+
+    if (bytes <= 0) { ok = 0; break; }
+    length += bytes;
+  }
+
+  buffer[length] = 0;
+  lua_pushboolean(lua, ok);
+  lua_pushstring(lua, buffer);
+
+  free(buffer);
+  return 2;
+}
+
+int
+request_read_line (lua_State *lua)
+{
+  lua_pushliteral(lua, "");
+
+  int ok = 1;
+  char c[2];
+
+  while (1)
+  {
+    c[0] = 0;
+    c[1] = 0;
+
+    size_t bytes = self->request->ssl
+      ? SSL_read(self->request->ssl, c, 1)
+      : read(self->request->io, c, 1);
+
+    if (bytes <= 0) { ok = 0; break; }
+    if (c[0] == '\n') break;
+    c[1] = 0;
+
+    lua_pushstring(lua, c);
+    lua_concat(lua, 2);
+  }
+
+  lua_pushboolean(lua, ok);
+  lua_insert(lua, -2);
+
+  return 2;
+}
+
+int
+request_write (lua_State *lua)
+{
+  const char *str = lua_popstring(lua);
+  size_t bytes = write(self->request->io, str, strlen(str));
+  if (bytes < 0) lua_pushnil(lua);
+  else lua_pushnumber(lua, bytes);
+  return 1;
+}
+
 struct function_map {
   const char *table;
   const char *name;
@@ -201,6 +275,9 @@ struct function_map registry_common[] = {
   { .table = "work",  .name = "pool",        .func = work_pool        },
   { .table = "work",  .name = "idle",        .func = work_idle        },
   { .table = "work",  .name = "backlog",     .func = work_backlog     },
+  { .table = "client",.name = "read",        .func = request_read     },
+  { .table = "client",.name = "read_line",   .func = request_read_line},
+  { .table = "client",.name = "write",       .func = request_write    },
 };
 
 struct function_map registry_handler[] = {
@@ -229,18 +306,6 @@ lua_functions(lua_State *lua, struct function_map *map, size_t cells)
       lua_setglobal(lua, fm->name);
     }
   }
-}
-
-int
-close_io (lua_State *lua)
-{
-  if (self->fio && self->io != fileno(stdin))
-  {
-    fclose(self->fio);
-    self->fio = NULL;
-    self->io = 0;
-  }
-  return 0;
 }
 
 void*
@@ -308,43 +373,43 @@ main_handler (void *ptr)
 
   while ((request = channel_read(&reqs)))
   {
-    handler->io = request->io;
+    handler->request = request;
+
+    if (cfg.ssl_cert && cfg.ssl_key)
+    {
+      request->ssl_ctx = SSL_CTX_new(SSLv23_server_method());
+      ensure(request->ssl_ctx) errorf("SSL_CTX_new failed");
+      SSL_CTX_set_options(request->ssl_ctx, SSL_OP_SINGLE_DH_USE);
+
+      ensure(SSL_CTX_use_certificate_file(request->ssl_ctx, cfg.ssl_cert, SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_certificate_file failed %s", cfg.ssl_cert);
+      ensure(SSL_CTX_use_PrivateKey_file(request->ssl_ctx,  cfg.ssl_key,  SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_PrivateKey_file failed %s",  cfg.ssl_key);
+
+      request->ssl = SSL_new(request->ssl_ctx);
+      ensure(request->ssl) errorf("SSL_new failed");
+
+      SSL_set_fd(request->ssl, request->io);
+
+      int ssl_err = SSL_accept(request->ssl);
+
+      if (ssl_err <= 0)
+      {
+        errorf("ssl negotiation failed");
+        SSL_shutdown(request->ssl);
+        SSL_free(request->ssl);
+        close(request->io);
+        free(request->ipv4);
+        free(request);
+        continue;
+      }
+    }
 
     ensure((handler->lua = luaL_newstate()))
       errorf("luaL_newstate failed");
 
     luaL_openlibs(handler->lua);
-
-    handler->fio = handler->io == fileno(stdin) ? stdin: fdopen(handler->io, "r+");
-
-    ensure(handler->fio)
-      errorf("fdopen failed");
-
     handler->rc = EXIT_SUCCESS;
 
     lua_createtable(handler->lua, 0, 0);
-    lua_pushstring(handler->lua, "sock");
-
-  #ifdef LUA51
-    FILE **fio = lua_newuserdata(handler->lua, sizeof(FILE*));
-    *fio = handler->fio;
-    luaL_getmetatable(handler->lua, LUA_FILEHANDLE);
-    lua_setmetatable(handler->lua, -2);
-    lua_createtable(handler->lua, 0, 1);
-    lua_pushcfunction(handler->lua, close_io);
-    lua_setfield(handler->lua, -2, "__close");
-    lua_setfenv(handler->lua, -2);
-  #endif
-
-  #ifdef LUA52
-    luaL_Stream *s = lua_newuserdata(handler->lua, sizeof(luaL_Stream));
-    s->f = handler->fio;
-    s->closef = close_io;
-    luaL_setmetatable(handler->lua, LUA_FILEHANDLE);
-  #endif
-
-    // sock
-    lua_settable(handler->lua, -3);
     lua_pushstring(handler->lua, "ip");
     if (request->ipv4) lua_pushstring(handler->lua, request->ipv4); else lua_pushnil(handler->lua);
     lua_settable(handler->lua, -3);
@@ -374,13 +439,20 @@ main_handler (void *ptr)
       handler->rc = EXIT_FAILURE;
     }
 
-    close_io(handler->lua);
     lua_close(handler->lua);
     db_close();
 
     if (cfg.mode == MODE_STDIN)
       break;
 
+    if (request->ssl)
+    {
+      SSL_shutdown(request->ssl);
+      SSL_free(request->ssl);
+      SSL_CTX_free(request->ssl_ctx);
+    }
+
+    close(request->io);
     free(request->ipv4);
     free(request);
   }
@@ -442,6 +514,8 @@ start(int argc, const char *argv[])
   cfg.max_jobs     = 0;
   cfg.max_results  = 0;
   cfg.db_path      = NULL;
+  cfg.ssl_cert     = NULL;
+  cfg.ssl_key      = NULL;
 
   signal(SIGINT,  sig_int);
   signal(SIGTERM, sig_term);
@@ -514,6 +588,18 @@ start(int argc, const char *argv[])
       cfg.max_results = strtol(argv[++argi], NULL, 0);
       continue;
     }
+    if (str_eq(argv[argi], "--ssl-cert"))
+    {
+      ensure(argi < argc-1) errorf("expected --ssl-cert <value>");
+      cfg.ssl_cert = argv[++argi];
+      continue;
+    }
+    if (str_eq(argv[argi], "--ssl-key"))
+    {
+      ensure(argi < argc-1) errorf("expected --ssl-key <value>");
+      cfg.ssl_key = argv[++argi];
+      continue;
+    }
 
     if (!cfg.handler_path && stat(argv[argi], &st) == 0)
     {
@@ -550,6 +636,9 @@ start(int argc, const char *argv[])
 
   ensure(cfg.handler_path || cfg.handler_code)
     errorf("expected lua -r script or inline code");
+
+  if (cfg.ssl_cert || cfg.ssl_key)
+    ensure(cfg.ssl_cert && cfg.ssl_key) errorf("expected SSL certificate and key");
 
   ensure(pthread_key_create(&key_self, NULL) == 0)
     errorf("pthread_key_create failed");
@@ -602,6 +691,23 @@ start(int argc, const char *argv[])
   }
 }
 
+pthread_mutex_t *ssl_locks;
+
+static void
+ssl_lock(int mode, int type, const char *file, int line)
+{
+  if (mode & CRYPTO_LOCK)
+    pthread_mutex_lock(&(ssl_locks[type]));
+  else
+    pthread_mutex_unlock(&(ssl_locks[type]));
+}
+
+static unsigned long
+ssl_thread_id(void)
+{
+  return pthread_self();
+}
+
 int
 main(int argc, char const *argv[])
 {
@@ -609,6 +715,21 @@ main(int argc, char const *argv[])
 
   if (cfg.mode == MODE_TCP)
   {
+    if (cfg.ssl_cert)
+    {
+      SSL_load_error_strings();
+      SSL_library_init();
+      OpenSSL_add_all_algorithms();
+
+      ssl_locks = malloc(CRYPTO_num_locks() * sizeof(pthread_mutex_t));
+
+      for (int i = 0; i < CRYPTO_num_locks(); i++)
+        pthread_mutex_init(&ssl_locks[i], NULL);
+
+      CRYPTO_set_id_callback(ssl_thread_id);
+      CRYPTO_set_locking_callback(ssl_lock);
+    }
+
     int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
     ensure(sock_fd >= 0)
@@ -642,19 +763,39 @@ main(int argc, char const *argv[])
 
     int fd;
     struct sockaddr caddr;
-    socklen_t clen;
+    memset(&caddr, 0, sizeof(caddr));
+    socklen_t clen = 0;
 
-    while ((fd = accept(sock_fd, &caddr, &clen)) && fd >= 0)
+    for (;;)
     {
-      request_t *request = malloc(sizeof(request_t));
-      request->io = fd;
-      request->ipv4 = NULL;
+      fd = accept(sock_fd, &caddr, &clen);
 
-      char *ipv4 = malloc(16);
-      request->ipv4 = (char*)inet_ntop(AF_INET, &caddr, ipv4, 16);
-      if (!request->ipv4) free(ipv4);
+      if (fd >= 0)
+      {
+        request_t *request = malloc(sizeof(request_t));
+        request->io = fd;
+        request->ipv4 = NULL;
+        request->ssl = NULL;
+        request->ssl_ctx = NULL;
 
-      channel_write(&reqs, request);
+        char *ipv4 = malloc(16);
+        request->ipv4 = (char*)inet_ntop(AF_INET, &caddr, ipv4, 16);
+        if (!request->ipv4) free(ipv4);
+
+        channel_write(&reqs, request);
+        continue;
+      }
+
+      switch (errno)
+      {
+        case EAGAIN:
+        case EINTR:
+        case EPROTO:
+        case ECONNABORTED:
+          continue;
+        default:
+          ensure(0) errorf("accept() failed %d", errno);
+      }
     }
 
     return EXIT_FAILURE;
