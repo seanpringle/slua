@@ -244,10 +244,24 @@ request_read_line (lua_State *lua)
 int
 request_write (lua_State *lua)
 {
-  const char *str = lua_popstring(lua);
-  size_t bytes = write(self->request->io, str, strlen(str));
-  if (bytes < 0) lua_pushnil(lua);
-  else lua_pushnumber(lua, bytes);
+  size_t bytes = 0;
+  if (lua_type(lua, -1) == LUA_TSTRING)
+  {
+    const char *str = lua_popstring(lua);
+    if (strlen(str))
+    {
+      bytes = self->request->ssl
+        ? SSL_write(self->request->ssl, str, strlen(str))
+        : write(self->request->io, str, strlen(str));
+    }
+  }
+  if (bytes < 0)
+    lua_pushnil(lua);
+  else
+  {
+    write(self->request->io, "\n", 1);
+    lua_pushnumber(lua, bytes+1);
+  }
   return 1;
 }
 
