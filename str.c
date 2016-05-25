@@ -104,4 +104,3 @@ str_unquote (char *str, char **err)
 
   return res;
 }
-

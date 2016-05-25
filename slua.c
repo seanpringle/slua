@@ -157,6 +157,7 @@ pthread_cond_t all_workers_idle;
 
 #include "work.c"
 #include "db.c"
+#include "hash.c"
 
 int
 safe_print (lua_State *lua)
@@ -288,6 +289,8 @@ struct function_map registry_common[] = {
   { .table = "work",  .name = "pool",        .func = work_pool        },
   { .table = "work",  .name = "idle",        .func = work_idle        },
   { .table = "work",  .name = "backlog",     .func = work_backlog     },
+  { .table = "string",.name = "md5",         .func = hash_md5         },
+  { .table = "string",.name = "sha1",        .func = hash_sha1        },
 };
 
 struct function_map registry_handler[] = {
