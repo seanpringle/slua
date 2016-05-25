@@ -472,6 +472,23 @@ main_handler (void *ptr)
   return NULL;
 }
 
+pthread_mutex_t *ssl_locks;
+
+static void
+ssl_lock(int mode, int type, const char *file, int line)
+{
+  if (mode & CRYPTO_LOCK)
+    pthread_mutex_lock(&(ssl_locks[type]));
+  else
+    pthread_mutex_unlock(&(ssl_locks[type]));
+}
+
+static unsigned long
+ssl_thread_id(void)
+{
+  return pthread_self();
+}
+
 void
 stop(int rc)
 {
@@ -643,7 +660,10 @@ start(int argc, const char *argv[])
     errorf("expected lua -r script or inline code");
 
   if (cfg.ssl_cert || cfg.ssl_key)
+  {
+    ensure(cfg.mode == MODE_TCP) errorf("SSL requires MODE_TCP");
     ensure(cfg.ssl_cert && cfg.ssl_key) errorf("expected SSL certificate and key");
+  }
 
   ensure(pthread_key_create(&key_self, NULL) == 0)
     errorf("pthread_key_create failed");
@@ -694,23 +714,28 @@ start(int argc, const char *argv[])
         errorf("pthread_create failed");
     }
   }
-}
 
-pthread_mutex_t *ssl_locks;
+  if (cfg.ssl_cert)
+  {
+    SSL_load_error_strings();
+    SSL_library_init();
+    OpenSSL_add_all_algorithms();
 
-static void
-ssl_lock(int mode, int type, const char *file, int line)
-{
-  if (mode & CRYPTO_LOCK)
-    pthread_mutex_lock(&(ssl_locks[type]));
-  else
-    pthread_mutex_unlock(&(ssl_locks[type]));
-}
+    ssl_locks = malloc(CRYPTO_num_locks() * sizeof(pthread_mutex_t));
 
-static unsigned long
-ssl_thread_id(void)
-{
-  return pthread_self();
+    for (int i = 0; i < CRYPTO_num_locks(); i++)
+      pthread_mutex_init(&ssl_locks[i], NULL);
+
+    CRYPTO_set_id_callback(ssl_thread_id);
+    CRYPTO_set_locking_callback(ssl_lock);
+
+    cfg.ssl_ctx = SSL_CTX_new(SSLv23_server_method());
+    ensure(cfg.ssl_ctx) errorf("SSL_CTX_new failed");
+    SSL_CTX_set_options(cfg.ssl_ctx, SSL_OP_SINGLE_DH_USE);
+
+    ensure(SSL_CTX_use_certificate_file(cfg.ssl_ctx, cfg.ssl_cert, SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_certificate_file failed %s", cfg.ssl_cert);
+    ensure(SSL_CTX_use_PrivateKey_file(cfg.ssl_ctx,  cfg.ssl_key,  SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_PrivateKey_file failed %s",  cfg.ssl_key);
+  }
 }
 
 int
@@ -720,28 +745,6 @@ main(int argc, char const *argv[])
 
   if (cfg.mode == MODE_TCP)
   {
-    if (cfg.ssl_cert)
-    {
-      SSL_load_error_strings();
-      SSL_library_init();
-      OpenSSL_add_all_algorithms();
-
-      ssl_locks = malloc(CRYPTO_num_locks() * sizeof(pthread_mutex_t));
-
-      for (int i = 0; i < CRYPTO_num_locks(); i++)
-        pthread_mutex_init(&ssl_locks[i], NULL);
-
-      CRYPTO_set_id_callback(ssl_thread_id);
-      CRYPTO_set_locking_callback(ssl_lock);
-
-      cfg.ssl_ctx = SSL_CTX_new(SSLv23_server_method());
-      ensure(cfg.ssl_ctx) errorf("SSL_CTX_new failed");
-      SSL_CTX_set_options(cfg.ssl_ctx, SSL_OP_SINGLE_DH_USE);
-
-      ensure(SSL_CTX_use_certificate_file(cfg.ssl_ctx, cfg.ssl_cert, SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_certificate_file failed %s", cfg.ssl_cert);
-      ensure(SSL_CTX_use_PrivateKey_file(cfg.ssl_ctx,  cfg.ssl_key,  SSL_FILETYPE_PEM) == 1) errorf("SSL_CTX_use_PrivateKey_file failed %s",  cfg.ssl_key);
-    }
-
     int sock_fd = socket(AF_INET, SOCK_STREAM, 0);
 
     ensure(sock_fd >= 0)
