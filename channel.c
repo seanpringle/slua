@@ -187,18 +187,16 @@ channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, si
   if (usec)
   {
     struct timespec ts;
-    int nsec = usec * 1000;
     clock_gettime(CLOCK_REALTIME, &ts);
 
-    if (ts.tv_nsec + nsec > 1000000000)
-    {
-      ts.tv_sec += 1;
-      ts.tv_nsec = nsec - (1000000000 - ts.tv_nsec);
-    }
-    else
-    {
-      ts.tv_nsec += nsec;
-    }
+    time_t sec = 0;
+    long nsec = ts.tv_nsec + (usec * 1000);
+
+    sec += nsec / 1000000000L;
+    nsec = nsec % 1000000000L;
+
+    ts.tv_sec = sec;
+    ts.tv_nsec = nsec;
 
     int rc = pthread_cond_timedwait(&channel->cond_active, &channel->mutex, &ts);
     ensure(rc == 0 || rc == ETIMEDOUT);
@@ -211,13 +209,13 @@ channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, si
 
   if (backlog)
     *backlog = channel->backlog;
-  
+
   if (readers)
     *readers = channel->readers;
-  
+
   if (writers)
     *writers = channel->writers;
-  
+
   channel->waiters--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
 }
