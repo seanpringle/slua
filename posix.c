@@ -25,6 +25,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <dirent.h>
 #include <pwd.h>
 #include <grp.h>
+#include <sys/wait.h>
+
+#define PIPE_READ 0
+#define PIPE_WRITE 1
 
 int
 posix_ls (lua_State *lua)
@@ -219,4 +223,127 @@ posix_strtotime (lua_State *lua)
   else
     lua_pushnil(lua);
   return 1;
+}
+
+// execute sub-process and connect its stdin=infp and stdout=outfp
+pid_t
+exec_cmd_io(const char *command, int *infp, int *outfp, int *errfp)
+{
+  int p_stdin[2], p_stdout[2], p_stderr[2];
+
+  if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0 || pipe(p_stderr) != 0)
+    return -1;
+
+  pid_t pid = fork();
+
+  if (pid < 0)
+    return pid;
+
+  if (pid == 0)
+  {
+    close(p_stdin[PIPE_WRITE]);
+    dup2(p_stdin[PIPE_READ], STDIN_FILENO);
+
+    close(p_stdout[PIPE_READ]);
+    dup2(p_stdout[PIPE_WRITE], STDOUT_FILENO);
+
+    close(p_stderr[PIPE_READ]);
+    dup2(p_stderr[PIPE_WRITE], STDERR_FILENO);
+
+    execlp("/bin/sh", "sh", "-c", command, NULL);
+    exit(EXIT_FAILURE);
+  }
+
+  if (infp == NULL)
+    close(p_stdin[PIPE_WRITE]);
+  else
+    *infp = p_stdin[PIPE_WRITE];
+
+  if (outfp == NULL)
+    close(p_stdout[PIPE_READ]);
+  else
+    *outfp = p_stdout[PIPE_READ];
+
+  if (errfp == NULL)
+    close(p_stderr[PIPE_READ]);
+  else
+    *errfp = p_stderr[PIPE_READ];
+
+  close(p_stdin[PIPE_READ]);
+  close(p_stdout[PIPE_WRITE]);
+  close(p_stderr[PIPE_WRITE]);
+
+  return pid;
+}
+
+int
+exec_command (const char *cmd, const char *data, char **output, char **errput)
+{
+  int status = EXIT_SUCCESS;
+  int in, out, err;
+
+  pid_t pid = exec_cmd_io(cmd, &in, &out, &err);
+
+  if (pid <= 0)
+  {
+    status = EXIT_FAILURE;
+    goto done;
+  }
+
+  if (data && write(in, data, strlen(data)) != strlen(data))
+  {
+    status = EXIT_FAILURE;
+    close(in);
+    close(out);
+    close(err);
+    kill(pid, SIGTERM);
+    goto done;
+  }
+
+  close(in);
+
+  int outlen = 0;
+  char *outres = malloc(1024);
+  int errlen = 0;
+  char *errres = malloc(1024);
+  for (;;)
+  {
+    int orc = read(out, outres+outlen, 1023);
+    if (orc > 0) outlen += orc;
+    outres = realloc(outres, outlen+1024);
+
+    int erc = read(err, errres+errlen, 1023);
+    if (erc > 0) errlen += erc;
+    errres = realloc(errres, errlen+1024);
+
+    if (!orc && !erc) break;
+  }
+  outres[outlen] = 0;
+  errres[errlen] = 0;
+
+  if (output) *output = outres; else free(outres);
+  if (errput) *errput = errres; else free(errres);
+
+  close(out);
+  close(err);
+
+  waitpid(pid, &status, 0);
+
+done:
+  return status;
+}
+
+int
+posix_command (lua_State *lua)
+{
+  char *out = NULL, *err = NULL;
+  const char *data = lua_gettop(lua) > 1 ? lua_popstring(lua): NULL;
+  const char *cmd  = lua_popstring(lua);
+  int rc = exec_command(cmd, data, &out, &err);
+  lua_pushnumber(lua, rc);
+  if (out) lua_pushstring(lua, out); else lua_pushnil(lua);
+  if (err) lua_pushstring(lua, err); else lua_pushnil(lua);
+  free(out);
+  free(err);
+  return 3;
 }

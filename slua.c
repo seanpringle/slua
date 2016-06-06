@@ -275,6 +275,7 @@ struct function_map registry_common[] = {
   { .table = "io",    .name = "stat",        .func = posix_stat       },
   { .table = "io",    .name = "ls",          .func = posix_ls         },
   { .table = "os",    .name = "usleep",      .func = posix_usleep     },
+  { .table = "os",    .name = "call",        .func = posix_command    },
   { .table = "table", .name = "json_encode", .func = json_encode      },
   { .table = "table", .name = "json_decode", .func = json_decode      },
   { .table = "string",.name = "pcre_match",  .func = pcre_match       },
