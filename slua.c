@@ -61,6 +61,7 @@ static pthread_key_t key_self;
 
 pthread_mutex_t stdout_mutex;
 pthread_mutex_t stderr_mutex;
+pthread_mutex_t fork_mutex;
 
 #define outputf(...) ({ \
   pthread_mutex_lock(&stdout_mutex); \
@@ -552,6 +553,7 @@ start(int argc, const char *argv[])
 
   ensure(pthread_mutex_init(&stdout_mutex, NULL) == 0);
   ensure(pthread_mutex_init(&stderr_mutex, NULL) == 0);
+  ensure(pthread_mutex_init(&fork_mutex,   NULL) == 0);
 
   for (int argi = 1; argi < argc; argi++)
   {
