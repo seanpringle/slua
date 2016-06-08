@@ -167,6 +167,7 @@ json_decode_step (lua_State *lua, char *json, int mode)
     }
 
     last = json;
+    lua_checkstack(lua, lua_gettop(lua)+10);
 
     switch (c)
     {
@@ -189,6 +190,18 @@ json_decode_step (lua_State *lua, char *json, int mode)
 
       case 'n':
         lua_pushnil(lua);
+        while (json && *json && !strchr(", \t\r\n", *json)) json++;
+        pushed++;
+        break;
+
+      case 't':
+        lua_pushboolean(lua, 1);
+        while (json && *json && !strchr(", \t\r\n", *json)) json++;
+        pushed++;
+        break;
+
+      case 'f':
+        lua_pushboolean(lua, 0);
         while (json && *json && !strchr(", \t\r\n", *json)) json++;
         pushed++;
         break;
@@ -230,7 +243,9 @@ json_decode_step (lua_State *lua, char *json, int mode)
     }
     else
     {
-      errorf("unexpected state, mode: %d, pushed: %d", mode, pushed);
+      errorf("unexpected state, mode: %d, pushed: %d, at %s", mode, pushed, last);
+      while (json && *json) json++;
+      lua_pushnil(lua);
       break;
     }
   }
