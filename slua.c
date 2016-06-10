@@ -123,10 +123,6 @@ config_t cfg;
 
 typedef struct {
   int multi;
-  int ipc_fd;
-  char ipc_name[100];
-  int ipc_size;
-  void *ipc;
   pthread_condattr_t condattr;
   pthread_mutexattr_t mutexattr;
   process_t *self;
@@ -154,7 +150,6 @@ typedef struct {
   pthread_mutex_t stderr_mutex;
   channel_t jobs;
   process_t *workers;
-  process_t *handlers;
 } shared_t;
 
 shared_t *shared;
@@ -294,6 +289,19 @@ request_write (lua_State *lua)
 void
 child_stop (int rc)
 {
+  process_t *process = global.self;
+  if (process->type == HANDLER)
+  {
+    channel_free(&process->results);
+    request_t *request = process->request;
+    if (request->ssl)
+    {
+      SSL_shutdown(request->ssl);
+      SSL_free(request->ssl);
+    }
+    close(request->io);
+    store_free(global.store, process);
+  }
   lua_close(global.lua);
   exit(rc);
 }
@@ -398,6 +406,8 @@ child (process_t *process)
 
   if (process->type == HANDLER)
   {
+    channel_init(&process->results, cfg.max_results);
+
     request_t *request = process->request;
 
     if (cfg.ssl_cert)
@@ -416,7 +426,6 @@ child (process_t *process)
 
     if (cfg.ssl_cert && cfg.ssl_key)
     {
-
       request->ssl = SSL_new(cfg.ssl_ctx);
       ensure(request->ssl) errorf("SSL_new failed");
 
@@ -426,9 +435,6 @@ child (process_t *process)
       if (ssl_err <= 0)
       {
         errorf("ssl negotiation failed");
-        SSL_shutdown(request->ssl);
-        SSL_free(request->ssl);
-        close(request->io);
         goto done;
       }
     }
@@ -444,12 +450,6 @@ child (process_t *process)
     {
       errorf("handler lua error: %s", lua_tostring(global.lua, -1));
       child_stop(EXIT_FAILURE);
-    }
-
-    if (request->ssl)
-    {
-      SSL_shutdown(request->ssl);
-      SSL_free(request->ssl);
     }
   }
   else
@@ -488,7 +488,7 @@ stop (int rc)
   pthread_mutexattr_destroy(&global.mutexattr);
   pthread_condattr_destroy(&global.condattr);
 
-  shm_unlink(global.ipc_name);
+  store_destroy(global.store);
   exit(rc);
 }
 
@@ -658,10 +658,11 @@ main (int argc, char const *argv[])
   global.store = store_create("store", 256, 100000);
   shared = store_alloc(global.store, sizeof(shared_t));
   shared->workers = store_alloc(global.store, sizeof(process_t) * cfg.max_workers);
-  shared->handlers = store_alloc(global.store, sizeof(process_t) * cfg.max_handlers);
 
   ensure(pthread_mutex_init(&shared->stdout_mutex, &global.mutexattr) == 0);
   ensure(pthread_mutex_init(&shared->stderr_mutex, &global.mutexattr) == 0);
+
+  global.multi = 1;
 
   channel_init(&shared->jobs, cfg.max_jobs);
 
@@ -727,14 +728,12 @@ main (int argc, char const *argv[])
 
         memset(request, 0, sizeof(request_t));
         request->io = fd;
-        request->ssl = NULL;
         inet_ntop(AF_INET, &caddr, request->ipv4, 16);
 
         process_t *process = store_alloc(global.store, sizeof(process_t));
+        memset(process, 0, sizeof(process_t));
         process->type = HANDLER;
         process->request = request;
-
-        channel_init(&process->results, 0);
 
         child(process);
         continue;
@@ -760,13 +759,11 @@ main (int argc, char const *argv[])
 
   memset(request, 0, sizeof(request_t));
   request->io = fileno(stdin);
-  request->ssl = NULL;
 
   process_t *process = store_alloc(global.store, sizeof(process_t));
+  memset(process, 0, sizeof(process_t));
   process->type = HANDLER;
   process->request = request;
-
-  channel_init(&process->results, 0);
 
   child(process);
 

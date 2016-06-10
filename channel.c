@@ -47,13 +47,13 @@ channel_free (channel_t *channel)
     {
       channel_node_t *node = channel->list;
       channel->list = node->next;
-      free(node);
+      if (node) store_free(global.store, node);
     }
     pthread_mutex_destroy(&channel->mutex);
     pthread_cond_destroy(&channel->cond_read);
     pthread_cond_destroy(&channel->cond_write);
     pthread_cond_destroy(&channel->cond_active);
-    free(channel->list);
+    if (channel->list) store_free(global.store, channel->list);
     channel->used = 0;
   }
 }

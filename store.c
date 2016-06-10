@@ -21,217 +21,162 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
-/*
-void
-dump (void *ptr, int len)
-{
-  unsigned char *p = ptr, *e = ptr+len;
-  while (p < e)
-  {
-    fprintf(stderr, "%lx  ", (uint64_t)p);
-    for (int j = 0; j < 16; j++)
-    {
-      fprintf(stderr, "%02x ", p[j]);
-    }
-    fprintf(stderr, " ");
-    for (int j = 0; j < 16; j++)
-    {
-      fprintf(stderr, "%c", isalnum(p[j]) ? p[j]: '.');
-    }
-    fprintf(stderr, "\n");
-    p += 16;
-  }
-}
-*/
+typedef struct {
+  char name[64];
+  pthread_mutex_t mutex;
+  int used;
+  int chunk;
+  int count;
+  int next;
+} store_t;
 
-pthread_mutex_t*
-store_mutex (void *ptr)
+int*
+store_links (store_t *store)
 {
-  return (void*) (ptr);
+  return (void*)store + sizeof(store_t);
 }
 
 int*
-store_chunk (void *ptr)
+store_lengths (store_t *store)
 {
-  return ptr + sizeof(pthread_mutex_t);
-}
-
-int*
-store_count (void *ptr)
-{
-  return ptr + sizeof(pthread_mutex_t) + sizeof(int);
-}
-
-int*
-store_next (void *ptr)
-{
-  return ptr + sizeof(pthread_mutex_t) + sizeof(int) + sizeof(int);
-}
-
-int*
-store_links (void *ptr)
-{
-  return ptr + sizeof(pthread_mutex_t) + sizeof(int) + sizeof(int) + sizeof(int);
-}
-
-int*
-store_lengths (void *ptr)
-{
-  int array = (*(store_count(ptr)) * sizeof(int));
-  return ptr + sizeof(pthread_mutex_t) + sizeof(int) + sizeof(int) + sizeof(int) + array;
+  int array = store->count * sizeof(int);
+  return (void*)store_links(store) + array;
 }
 
 void*
-store_data (void *ptr)
+store_data (store_t *store)
 {
-  int array = (*(store_count(ptr)) * sizeof(int));
-  return ptr + sizeof(pthread_mutex_t) + sizeof(int) + sizeof(int) + sizeof(int) + array + array;
+  int array = store->count * sizeof(int);
+  return (void*)store_lengths(store) + array;
 }
 
 void*
-store_slot (void *ptr, int id)
+store_slot (store_t *store, int id)
 {
-  int chunk = *(store_chunk(ptr));
-  void *data = store_data(ptr);
-  return data + (id * chunk);
+  return store_data(store) + (id * store->chunk);
 }
 
 int
-store_size (void *ptr)
+store_size (store_t *store)
 {
-  int chunk = *(store_chunk(ptr));
-  int count = *(store_count(ptr));
-  return
-    sizeof(pthread_mutex_t)
-    + sizeof(int) // chunk
-    + sizeof(int) // count
-    + sizeof(int) // free list
-    + (sizeof(int) * count) // links
-    + (sizeof(int) * count) // lengths
-    + (chunk * count) // data
-  ;
+  return sizeof(store_t)
+    + (sizeof(int) * store->count) // links
+    + (sizeof(int) * store->count) // lengths
+    + (store->chunk * store->count); // data
 }
 
-void*
+store_t*
 store_create (const char *name, int chunk, int count)
 {
-  int size =
-    sizeof(pthread_mutex_t)
-    + sizeof(int) // chunk
-    + sizeof(int) // count
-    + sizeof(int) // free list
+  int size = sizeof(store_t)
     + (sizeof(int) * count) // links
     + (sizeof(int) * count) // lengths
-    + (chunk * count) // data
-  ;
+    + (chunk * count); // data
 
-  char ipcname[100];
+  char ipcname[64];
   snprintf(ipcname, sizeof(ipcname), "/slua_%d_%s", getpid(), name);
 
   int fd = shm_open(ipcname, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
   if (fd < 0 || ftruncate(fd, size) != 0) return NULL;
 
-  void *ptr = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-  if (ptr == MAP_FAILED) return NULL;
+  store_t *store = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  if (store == MAP_FAILED) return NULL;
 
   close(fd);
 
   pthread_mutexattr_t mutexattr;
   ensure(pthread_mutexattr_init(&mutexattr) == 0);
   ensure(pthread_mutexattr_setpshared(&mutexattr, PTHREAD_PROCESS_SHARED) == 0);
-  ensure(pthread_mutex_init(store_mutex(ptr), &mutexattr) == 0);
+  ensure(pthread_mutex_init(&store->mutex, &mutexattr) == 0);
   pthread_mutexattr_destroy(&mutexattr);
 
-  *(store_chunk(ptr)) = chunk;
-  *(store_count(ptr)) = count;
-  *(store_next(ptr))  = 0;
+  store->used  = 0;
+  store->chunk = chunk;
+  store->count = count;
+  store->next  = 0;
 
-  int *links = store_links(ptr);
+  strcpy(store->name, ipcname);
 
-  for (int i = 0; i < count; i++)
-    links[i] = i+1;
-
+  int *links = store_links(store);
+  for (int i = 0; i < count; links[i] = i+1, i++);
   links[count-1] = -1;
 
-  int *lengths = store_lengths(ptr);
+  int *lengths = store_lengths(store);
+  for (int i = 0; i < count; lengths[i++] = 0);
 
-  for (int i = 0; i < count; i++)
-    lengths[i] = 0;
-
-  return ptr;
+  return store;
 }
 
 void
-store_destroy (const char *name, void *ptr)
+store_destroy (store_t *store)
 {
-  char ipcname[100];
-  snprintf(ipcname, sizeof(ipcname), "/slua_%d_%s", getpid(), name);
+  char ipcname[64];
+  strcpy(ipcname, store->name);
+  munmap(store, store_size(store));
   shm_unlink(ipcname);
 }
 
 int
-store_set (void *ptr, void *src, int len)
+store_set (store_t *store, void *src, int len)
 {
-  ensure(pthread_mutex_lock(store_mutex(ptr)) == 0);
+  ensure(pthread_mutex_lock(&store->mutex) == 0);
 
-  int chunk = *(store_chunk(ptr));
-  int next = *(store_next(ptr));
-  int *links = store_links(ptr);
-  int *lengths = store_lengths(ptr);
+  int *links = store_links(store);
+  int *lengths = store_lengths(store);
 
-  int id = next;
+  int id = store->next;
 
-  ensure(id >= 0) errorf("store(%d) full", chunk);
+  ensure(id >= 0) errorf("store(%d) full", store->chunk);
 
-  int slot = next;
-  int bytes = chunk;
+  int slot = store->next;
+  int bytes = store->chunk;
 
   while (bytes < len)
   {
     slot = links[slot];
-    ensure (slot >= 0) errorf("store(%d) full", chunk);
-    bytes += chunk;
+    ensure (slot >= 0) errorf("store(%d) full", store->chunk);
+    bytes += store->chunk;
   }
 
-  slot = next;
-  bytes = min(chunk, len);
+  slot = store->next;
+  bytes = min(store->chunk, len);
   if (src)
   {
-    memmove(store_slot(ptr, slot), src, bytes);
+    memmove(store_slot(store, slot), src, bytes);
     src += bytes;
   }
   len -= bytes;
   lengths[slot] = bytes;
+  store->used++;
 
   while (len > 0)
   {
     slot = links[slot];
-    bytes = min(chunk, len);
+    bytes = min(store->chunk, len);
     if (src)
     {
-      memmove(store_slot(ptr, slot), src, bytes);
+      memmove(store_slot(store, slot), src, bytes);
       src += bytes;
     }
     len -= bytes;
     lengths[slot] = bytes;
+    store->used++;
   }
 
-  next = links[slot];
+  store->next = links[slot];
   links[slot] = -1;
 
-  *(store_next(ptr)) = next;
-
-  ensure(pthread_mutex_unlock(store_mutex(ptr)) == 0);
+  ensure(pthread_mutex_unlock(&store->mutex) == 0);
   return id;
 }
 
 void*
-store_get (void *ptr, int id, int remove)
+store_get (store_t *store, int id, int remove)
 {
-  ensure(pthread_mutex_lock(store_mutex(ptr)) == 0);
+  ensure(pthread_mutex_lock(&store->mutex) == 0);
 
-  int *links = store_links(ptr);
-  int *lengths = store_lengths(ptr);
+  int *links = store_links(store);
+  int *lengths = store_lengths(store);
 
   int slot = id;
   int len = lengths[slot];
@@ -246,12 +191,12 @@ store_get (void *ptr, int id, int remove)
 
   slot = id;
   len = lengths[slot];
-  memmove(dst, store_slot(ptr, slot), len);
+  memmove(dst, store_slot(store, slot), len);
 
   while (links[slot] > -1)
   {
     slot = links[slot];
-    memmove(dst + len, store_slot(ptr, slot), lengths[slot]);
+    memmove(dst + len, store_slot(store, slot), lengths[slot]);
     len += lengths[slot];
   }
 
@@ -260,27 +205,26 @@ store_get (void *ptr, int id, int remove)
     int slot = id;
     do {
       int next = links[slot];
-      links[slot] = *(store_next(ptr));
-      *(store_next(ptr)) = slot;
+      links[slot] = store->next;
+      store->next = slot;
       slot = next;
+      store->used--;
     }
     while (slot > -1);
   }
 
-  ensure(pthread_mutex_unlock(store_mutex(ptr)) == 0);
+  ensure(pthread_mutex_unlock(&store->mutex) == 0);
   return dst;
 }
 
 void*
-store_alloc (void *ptr, int len)
+store_alloc (store_t *store, int len)
 {
-  return store_slot(ptr, store_set(ptr, NULL, len));
+  return store_slot(store, store_set(store, NULL, len));
 }
 
 void
-store_free (void *ptr, void *ptr2)
+store_free (store_t *store, void *ptr)
 {
-  int chunk = *(store_chunk(ptr));
-  int id = (ptr2 - store_slot(ptr, 0)) / chunk;
-  free(store_get(ptr, id, 1));
+  free(store_get(store, (ptr - store_slot(store, 0)) / store->chunk, 1));
 }
