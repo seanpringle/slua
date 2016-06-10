@@ -24,26 +24,30 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 int
 work_accept (lua_State *lua)
 {
-  message_t *message = channel_read(&jobs);
-  if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
-  self->result = message->result;
+  char *message = channel_read(&shared->jobs);
+
+  process_t *process = (process_t*)strtoull(message, &message, 0);
+  global.self->result = &process->results;
+
+  if (strtol(message, &message, 0) == 1) lua_pushstring(lua, ++message); else lua_pushnil(lua);
 
   lua_getglobal(lua, "work");
   lua_pushstring(lua, "job");
-  if (message->payload) lua_pushstring(lua, message->payload); else lua_pushnil(lua);
+  lua_pushvalue(lua, -3);
   lua_settable(lua, -3);
   lua_pop(lua, 1);
 
-  free(message->payload);
-  free(message);
+  store_free(global.store, message);
   return 1;
 }
 
 int
 work_answer (lua_State *lua)
 {
-  channel_write(self->result,
-    lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL);
+  char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
+  char *message = strf("%d %s", payload ? 1:0, payload);
+  channel_write(global.self->result, store_slot(global.store, store_set(global.store, message, strlen(message)+1)));
+  free(message);
   return 0;
 }
 
@@ -53,11 +57,10 @@ work_submit (lua_State *lua)
   ensure(cfg.worker_path || cfg.worker_code)
     errorf("no workers");
 
-  message_t *message = malloc(sizeof(message_t));
-  message->result = self->type == HANDLER ? &self->results: self->result;
-  message->payload = lua_type(lua, -1) == LUA_TSTRING ? strdup((char*)lua_popstring(lua)) : NULL;
-
-  channel_write(&jobs, message);
+  char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
+  char *message = strf("%lld %d %s", (uint64_t*)global.self, payload ? 1:0, payload);
+  channel_write(&shared->jobs, store_slot(global.store, store_set(global.store, message, strlen(message)+1)));
+  free(message);
   return 0;
 }
 
@@ -67,9 +70,10 @@ work_collect (lua_State *lua)
   ensure(cfg.worker_path || cfg.worker_code)
     errorf("no workers");
 
-  char *payload = channel_read(&self->results);
-  if (payload) lua_pushstring(lua, payload); else lua_pushnil(lua);
-  free(payload);
+  char *message = channel_read(&global.self->results);
+  if (strtol(message, &message, 0) == 1) lua_pushstring(lua, ++message); else lua_pushnil(lua);
+  store_free(global.store, message);
+
   return 1;
 }
 
@@ -83,14 +87,14 @@ work_pool (lua_State *lua)
 int
 work_idle (lua_State *lua)
 {
-  lua_pushnumber(lua, channel_readers(&jobs));
+  lua_pushnumber(lua, channel_readers(&shared->jobs));
   return 1;
 }
 
 int
 work_backlog (lua_State *lua)
 {
-  lua_pushnumber(lua, channel_backlog(&jobs));
+  lua_pushnumber(lua, channel_backlog(&shared->jobs));
   return 1;
 }
 
@@ -99,7 +103,7 @@ work_active (lua_State *lua)
 {
   size_t readers, writers, backlog;
 
-  if (channel_backlog(&self->results) > 0)
+  if (channel_backlog(&global.self->results) > 0)
   {
     lua_pushboolean(lua, 1);
     return 1;
@@ -107,9 +111,9 @@ work_active (lua_State *lua)
 
   for (;;)
   {
-    channel_wait(&jobs, 100000, &backlog, &readers, &writers);
+    channel_wait(&shared->jobs, 100000, &backlog, &readers, &writers);
 
-    if (backlog > 0 || channel_backlog(&self->results) > 0)
+    if (backlog > 0 || channel_backlog(&global.self->results) > 0)
     {
       lua_pushboolean(lua, 1);
       return 1;

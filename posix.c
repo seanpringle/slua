@@ -282,11 +282,7 @@ exec_command (const char *cmd, const char *data, char **output, char **errput)
   int status = EXIT_SUCCESS;
   int in, out, err;
 
-  ensure(pthread_mutex_lock(&fork_mutex) == 0);
-
   pid_t pid = exec_cmd_io(cmd, &in, &out, &err);
-
-  ensure(pthread_mutex_unlock(&fork_mutex) == 0);
 
   if (pid <= 0)
   {
