@@ -47,13 +47,13 @@ channel_free (channel_t *channel)
     {
       channel_node_t *node = channel->list;
       channel->list = node->next;
-      if (node) store_free(global.store, node);
+      store_free(global.store, node);
     }
     pthread_mutex_destroy(&channel->mutex);
     pthread_cond_destroy(&channel->cond_read);
     pthread_cond_destroy(&channel->cond_write);
     pthread_cond_destroy(&channel->cond_active);
-    if (channel->list) store_free(global.store, channel->list);
+    store_free(global.store, channel->list);
     channel->used = 0;
   }
 }
@@ -96,7 +96,8 @@ channel_read (channel_t *channel)
   channel_node_t *node = channel->list;
   channel->list = node->next;
 
-  void *msg = node->payload;
+  void *msg = malloc(node->length);
+  memmove(msg, node->payload, node->length);
 
   if (node == channel->last)
     channel->last = NULL;
@@ -115,7 +116,7 @@ channel_read (channel_t *channel)
 }
 
 void
-channel_write (channel_t *channel, void *msg)
+channel_write (channel_t *channel, void *msg, size_t len)
 {
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
@@ -131,11 +132,10 @@ channel_write (channel_t *channel, void *msg)
 
   channel->backlog++;
 
-  channel_node_t n;
-  n.payload = msg;
-  n.next = NULL;
-
-  channel_node_t *node = store_slot(global.store, store_set(global.store, &n, sizeof(channel_node_t)));
+  channel_node_t *node = store_alloc(global.store, sizeof(channel_node_t) + len);
+  node->next = NULL;
+  node->length = len;
+  memmove(node->payload, msg, len);
 
   if (!channel->list)
   {

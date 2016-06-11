@@ -60,9 +60,23 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define ensure(x) for ( ; !(x) ; exit(EXIT_FAILURE) )
 
+void
+dump (void *ptr, unsigned int bytes)
+{
+  for (int i = 0; i < bytes; i += 16)
+  {
+    unsigned char *p = ptr + i;
+    fprintf(stderr, "%ld ", (uint64_t)p);
+    for (int j = 0; j < 16; j++) fprintf(stderr, "%02x ", p[j]);
+    for (int j = 0; j < 16; j++) fprintf(stderr, "%c", isalnum(p[j]) ? p[j]: '.');
+    fprintf(stderr, "\n");
+  }
+}
+
 typedef struct _channel_node_t {
-  void *payload;
   struct _channel_node_t *next;
+  size_t length;
+  char payload[];
 } channel_node_t;
 
 typedef struct {
@@ -85,6 +99,12 @@ typedef struct {
   char ipv4[16];
   SSL *ssl;
 } request_t;
+
+typedef struct {
+  channel_t *respond;
+  unsigned char is_nil;
+  char payload[];
+} message_t;
 
 #define HANDLER 1
 #define WORKER 2
@@ -117,6 +137,8 @@ typedef struct {
   const char *ssl_cert;
   const char *ssl_key;
   SSL_CTX *ssl_ctx;
+  size_t shared_mem;
+  size_t shared_page;
 } config_t;
 
 config_t cfg;
@@ -154,6 +176,7 @@ typedef struct {
 
 shared_t *shared;
 
+#include "arena.c"
 #include "store.c"
 #include "channel.c"
 
@@ -300,7 +323,9 @@ child_stop (int rc)
       SSL_free(request->ssl);
     }
     close(request->io);
-    store_free(global.store, process);
+
+    if (process->type == HANDLER)
+      store_free(global.store, process);
   }
   lua_close(global.lua);
   exit(rc);
@@ -483,10 +508,14 @@ stop (int rc)
     }
   }
 
+  arena_dump(store_arena(global.store));
+
   pthread_mutex_destroy(&shared->stdout_mutex);
   pthread_mutex_destroy(&shared->stderr_mutex);
   pthread_mutexattr_destroy(&global.mutexattr);
   pthread_condattr_destroy(&global.condattr);
+
+  global.multi = 0;
 
   store_destroy(global.store);
   exit(rc);
@@ -527,6 +556,8 @@ main (int argc, char const *argv[])
   cfg.ssl_cert     = NULL;
   cfg.ssl_key      = NULL;
   cfg.ssl_ctx      = NULL;
+  cfg.shared_mem   = 32 * 1024 * 1024;
+  cfg.shared_page  = 1024;
 
   struct stat st;
 
@@ -594,7 +625,18 @@ main (int argc, char const *argv[])
       cfg.max_results = strtol(argv[++argi], NULL, 0);
       continue;
     }
-    if (str_eq(argv[argi], "--ssl-cert"))
+    if (str_eq(argv[argi], "-sm") || str_eq(argv[argi], "--shared-memory"))
+    {
+      ensure(argi < argc-1) errorf("expected (-sm|--shared-memory) <value>");
+      cfg.shared_mem = strtol(argv[++argi], NULL, 0) * 1024 * 1024;
+      continue;
+    }
+    if (str_eq(argv[argi], "-sp") || str_eq(argv[argi], "--shared-page"))
+    {
+      ensure(argi < argc-1) errorf("expected (-sp|--shared-page) <value>");
+      cfg.shared_page = strtol(argv[++argi], NULL, 0);
+      continue;
+    }    if (str_eq(argv[argi], "--ssl-cert"))
     {
       ensure(argi < argc-1) errorf("expected --ssl-cert <value>");
       cfg.ssl_cert = argv[++argi];
@@ -655,7 +697,7 @@ main (int argc, char const *argv[])
   ensure(pthread_mutexattr_init(&global.mutexattr) == 0);
   ensure(pthread_mutexattr_setpshared(&global.mutexattr, PTHREAD_PROCESS_SHARED) == 0);
 
-  global.store = store_create("store", 256, 100000);
+  global.store = store_create("store", cfg.shared_mem, cfg.shared_page);
   shared = store_alloc(global.store, sizeof(shared_t));
   shared->workers = store_alloc(global.store, sizeof(process_t) * cfg.max_workers);
 
@@ -765,9 +807,9 @@ main (int argc, char const *argv[])
   process->type = HANDLER;
   process->request = request;
 
-  child(process);
+  int status = 0;
+  pid_t pid = child(process);
+  waitpid(pid, &status, 0);
 
-  for (;;) usleep(1000);
-
-  return 0;
+  stop(status);
 }

@@ -24,12 +24,10 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 int
 work_accept (lua_State *lua)
 {
-  char *message = channel_read(&shared->jobs);
+  message_t *msg = channel_read(&shared->jobs);
+  global.self->result = msg->respond;
 
-  process_t *process = (process_t*)strtoull(message, &message, 0);
-  global.self->result = &process->results;
-
-  if (strtol(message, &message, 0) == 1) lua_pushstring(lua, ++message); else lua_pushnil(lua);
+  if (!msg->is_nil) lua_pushstring(lua, msg->payload); else lua_pushnil(lua);
 
   lua_getglobal(lua, "work");
   lua_pushstring(lua, "job");
@@ -37,7 +35,7 @@ work_accept (lua_State *lua)
   lua_settable(lua, -3);
   lua_pop(lua, 1);
 
-  store_free(global.store, message);
+  free(msg);
   return 1;
 }
 
@@ -45,9 +43,16 @@ int
 work_answer (lua_State *lua)
 {
   char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
-  char *message = strf("%d %s", payload ? 1:0, payload);
-  channel_write(global.self->result, store_slot(global.store, store_set(global.store, message, strlen(message)+1)));
-  free(message);
+  size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
+
+  message_t *msg = malloc(length);
+  msg->is_nil = payload ? 0:1;
+  msg->respond = NULL;
+  if (payload) strcpy(msg->payload, payload);
+
+  channel_write(global.self->result, msg, length);
+
+  free(msg);
   return 0;
 }
 
@@ -58,9 +63,16 @@ work_submit (lua_State *lua)
     errorf("no workers");
 
   char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
-  char *message = strf("%lld %d %s", (uint64_t*)global.self, payload ? 1:0, payload);
-  channel_write(&shared->jobs, store_slot(global.store, store_set(global.store, message, strlen(message)+1)));
-  free(message);
+  size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
+
+  message_t *msg = malloc(length);
+  msg->is_nil = payload ? 0:1;
+  msg->respond = global.self->type == HANDLER ? &global.self->results: global.self->result;
+  if (payload) strcpy(msg->payload, payload);
+
+  channel_write(&shared->jobs, msg, length);
+
+  free(msg);
   return 0;
 }
 
@@ -70,9 +82,9 @@ work_collect (lua_State *lua)
   ensure(cfg.worker_path || cfg.worker_code)
     errorf("no workers");
 
-  char *message = channel_read(&global.self->results);
-  if (strtol(message, &message, 0) == 1) lua_pushstring(lua, ++message); else lua_pushnil(lua);
-  store_free(global.store, message);
+  message_t *msg = channel_read(&global.self->results);
+  if (!msg->is_nil) lua_pushstring(lua, msg->payload); else lua_pushnil(lua);
+  free(msg);
 
   return 1;
 }

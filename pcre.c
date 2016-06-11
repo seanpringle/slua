@@ -59,7 +59,7 @@ pcre_match(lua_State *lua)
   if (matches < 0)
   {
     if (extra)
-      pcre_free(extra);
+      pcre_free_study(extra);
     pcre_free(re);
     lua_pushnil(lua);
     return 1;
@@ -84,7 +84,7 @@ pcre_match(lua_State *lua)
   free(buffer);
 
   if (extra)
-    pcre_free(extra);
+    pcre_free_study(extra);
   pcre_free(re);
 
   return matches;
