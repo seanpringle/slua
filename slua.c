@@ -636,7 +636,8 @@ main (int argc, char const *argv[])
       ensure(argi < argc-1) errorf("expected (-sp|--shared-page) <value>");
       cfg.shared_page = strtol(argv[++argi], NULL, 0);
       continue;
-    }    if (str_eq(argv[argi], "--ssl-cert"))
+    }
+    if (str_eq(argv[argi], "--ssl-cert"))
     {
       ensure(argi < argc-1) errorf("expected --ssl-cert <value>");
       cfg.ssl_cert = argv[++argi];
