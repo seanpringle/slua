@@ -508,7 +508,7 @@ stop (int rc)
     }
   }
 
-  arena_dump(store_arena(global.store));
+  //arena_dump(store_arena(global.store));
 
   pthread_mutex_destroy(&shared->stdout_mutex);
   pthread_mutex_destroy(&shared->stderr_mutex);

@@ -54,6 +54,7 @@ store_create (const char *name, int size, int page)
   pthread_mutexattr_destroy(&mutexattr);
 
   store->size = size;
+  strcpy(store->name, ipcname);
 
   ensure(arena_open(store_arena(store), size - sizeof(store_t), page) == 0);
 
@@ -68,6 +69,7 @@ store_destroy (store_t *store)
   strcpy(ipcname, store->name);
   munmap(store, store->size);
   shm_unlink(ipcname);
+  errorf("%s", ipcname);
 }
 
 void*
