@@ -32,7 +32,7 @@ typedef struct {
 static void*
 arena_data (arena_t *arena)
 {
-  size_t offset = sizeof(arena_t) + (arena->pages * sizeof(unsigned char));
+  size_t offset = sizeof(arena_t) + arena->pages;
   return (void*)arena + offset + (offset % sizeof(void*));
 }
 
@@ -62,6 +62,7 @@ arena_open (void *pool, unsigned int bytes, unsigned int page_size)
 int
 arena_close (void *pool)
 {
+  memset(pool, 0, ((arena_t*)pool)->bytes);
   return 0;
 }
 
@@ -73,26 +74,33 @@ arena_alloc (void *pool, unsigned int bytes)
   arena_t *arena = pool;
 
   unsigned int pages = (bytes / arena->page_size) + (bytes % arena->page_size ? 1:0);
-  unsigned int page_id = arena->start_scan;
-  unsigned int pages_found = 0;
+  unsigned int gap = 0;
 
-  for (unsigned int i = page_id; i < arena->pages && pages_found < pages; i++)
+  unsigned char *flags = &arena->flags[arena->start_scan];
+  unsigned char *limit = flags + arena->pages;
+
+  while (flags < limit && (flags = memchr(flags, 0, limit - flags)) && flags && limit - flags >= pages)
   {
-    pages_found = arena->flags[i] == 0 ? pages_found+1: 0;
-    if (pages_found == 1) page_id = i;
+    for (gap = 1;
+      gap && gap < pages;
+      gap = flags[gap] ? 0: gap+1
+    );
+    if (gap == pages)
+    {
+      unsigned int page_id = flags - arena->flags;
+      memset(&arena->flags[page_id], (1<<0), pages);
+
+      arena->flags[page_id+(pages-1)] |= (1<<1);
+      ptr = arena_page(arena, page_id);
+
+      if (page_id == arena->start_scan)
+        arena->start_scan = page_id + pages;
+
+      break;
+    }
+    flags++;
   }
 
-  if (pages_found == pages)
-  {
-    for (unsigned int i = 0; i < pages; i++)
-      arena->flags[page_id+i] = (1<<0);
-
-    arena->flags[page_id+(pages-1)] |= (1<<1);
-    ptr = arena_page(arena, page_id);
-
-    if (page_id == arena->start_scan)
-      arena->start_scan = page_id + pages;
-  }
   return ptr;
 }
 
@@ -120,7 +128,6 @@ arena_free (void *pool, void *ptr)
     last_page = arena->flags[page_id] & (1<<1);
     arena->flags[page_id++] = 0;
   }
-
   return 0;
 }
 
@@ -130,7 +137,7 @@ arena_dump (void *pool)
   arena_t *arena = pool;
 
   errorf("arena %lu %u %u %u", (uint64_t)pool, arena->bytes, arena->pages, arena->start_scan);
-  dump(arena->flags, arena->pages * sizeof(unsigned char));
+  dump(arena->flags, arena->pages);
 
 //  for (int page_id = 0; page_id < arena->pages; page_id++)
 //  {
