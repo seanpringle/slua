@@ -45,7 +45,7 @@ work_answer (lua_State *lua)
   char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
   size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
 
-  message_t *msg = malloc(length);
+  message_t *msg = calloc(length, 1);
   msg->is_nil = payload ? 0:1;
   msg->respond = NULL;
   if (payload) strcpy(msg->payload, payload);
@@ -65,7 +65,7 @@ work_submit (lua_State *lua)
   char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
   size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
 
-  message_t *msg = malloc(length);
+  message_t *msg = calloc(length, 1);
   msg->is_nil = payload ? 0:1;
   msg->respond = global.self->type == HANDLER ? &global.self->results: global.self->result;
   if (payload) strcpy(msg->payload, payload);

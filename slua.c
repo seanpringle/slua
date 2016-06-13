@@ -60,19 +60,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define ensure(x) for ( ; !(x) ; exit(EXIT_FAILURE) )
 
-void
-dump (void *ptr, unsigned int bytes)
-{
-  for (int i = 0; i < bytes; i += 16)
-  {
-    unsigned char *p = ptr + i;
-    fprintf(stderr, "%ld ", (uint64_t)p);
-    for (int j = 0; j < 16; j++) fprintf(stderr, "%02x ", p[j]);
-    for (int j = 0; j < 16; j++) fprintf(stderr, "%c", isalnum(p[j]) ? p[j]: '.');
-    fprintf(stderr, "\n");
-  }
-}
-
 typedef struct _channel_node_t {
   struct _channel_node_t *next;
   size_t length;
@@ -154,6 +141,15 @@ typedef struct {
 
 global_t global;
 
+typedef struct {
+  pthread_mutex_t stdout_mutex;
+  pthread_mutex_t stderr_mutex;
+  channel_t jobs;
+  process_t *workers;
+} shared_t;
+
+shared_t *shared;
+
 #define outputf(...) ({ \
   if (global.multi) ensure(pthread_mutex_lock(&shared->stdout_mutex) == 0); \
   fprintf(stdout, __VA_ARGS__); fputc('\n', stdout); \
@@ -167,14 +163,34 @@ global_t global;
   if (global.multi) ensure(pthread_mutex_unlock(&shared->stderr_mutex) == 0); \
 })
 
-typedef struct {
-  pthread_mutex_t stdout_mutex;
-  pthread_mutex_t stderr_mutex;
-  channel_t jobs;
-  process_t *workers;
-} shared_t;
+void
+dump (void *ptr, unsigned int bytes)
+{
+  if (global.multi) ensure(pthread_mutex_lock(&shared->stderr_mutex) == 0);
 
-shared_t *shared;
+  unsigned char *e = (unsigned char*)ptr + bytes;
+  for (int i = 0; i < bytes; i += 16)
+  {
+    unsigned char *p = (unsigned char*)ptr + i;
+    fprintf(stderr, "%ld ", (uint64_t)p);
+    for (int j = 0; j < 16; j++)
+    {
+      if (p+j < e)
+        fprintf(stderr, "%02x ", p[j]);
+      else
+        fprintf(stderr, "   ");
+    }
+    for (int j = 0; j < 16; j++)
+    {
+      if (p+j < e)
+        fprintf(stderr, "%c", isalnum(p[j]) ? p[j]: '.');
+      else
+        fprintf(stderr, " ");
+    }
+    fprintf(stderr, "\n");
+  }
+  if (global.multi) ensure(pthread_mutex_unlock(&shared->stderr_mutex) == 0);
+}
 
 #include "arena.c"
 #include "store.c"

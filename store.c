@@ -64,6 +64,7 @@ store_create (const char *name, int size, int page)
 void
 store_destroy (store_t *store)
 {
+  pthread_mutex_destroy(&store->mutex);
   arena_close(store_arena(store));
   char ipcname[64];
   strcpy(ipcname, store->name);
