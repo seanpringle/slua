@@ -69,7 +69,6 @@ store_destroy (store_t *store)
   strcpy(ipcname, store->name);
   munmap(store, store->size);
   shm_unlink(ipcname);
-  errorf("%s", ipcname);
 }
 
 void*
