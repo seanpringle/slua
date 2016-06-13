@@ -27,33 +27,29 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <stdio.h>
 #include <stdint.h>
 #include <stdarg.h>
-#include <ctype.h>
 #include <string.h>
 #include <unistd.h>
-#include <regex.h>
-#include <lua.h>
-#include <lauxlib.h>
-#include <lualib.h>
 #include <pthread.h>
+#include <pwd.h>
+#include <signal.h>
+#include <errno.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/types.h>
-#include <pwd.h>
-#include <signal.h>
-#include <math.h>
-#include <sqlite3.h>
-#include <errno.h>
-#include <time.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
-#include <fcntl.h>
 
 #include <openssl/bio.h>
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+
+#include <lua.h>
+#include <lauxlib.h>
+#include <lualib.h>
 
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
 #define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
