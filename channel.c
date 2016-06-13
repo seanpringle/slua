@@ -96,13 +96,8 @@ channel_read (channel_t *channel)
   channel_node_t *node = channel->list;
   channel->list = node->next;
 
-  void *msg = malloc(node->length);
-  memmove(msg, node->payload, node->length);
-
   if (node == channel->last)
     channel->last = NULL;
-
-  store_free(global.store, node);
 
   if (channel->writers)
     ensure(pthread_cond_signal(&channel->cond_write) == 0);
@@ -112,12 +107,22 @@ channel_read (channel_t *channel)
 
   channel->readers--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
+
+  void *msg = malloc(node->length);
+  memmove(msg, node->payload, node->length);
+
+  store_free(global.store, node);
   return msg;
 }
 
 void
 channel_write (channel_t *channel, void *msg, size_t len)
 {
+  channel_node_t *node = store_alloc(global.store, sizeof(channel_node_t) + len);
+  node->next = NULL;
+  node->length = len;
+  memmove(node->payload, msg, len);
+
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
 
@@ -131,11 +136,6 @@ channel_write (channel_t *channel, void *msg, size_t len)
   }
 
   channel->backlog++;
-
-  channel_node_t *node = store_alloc(global.store, sizeof(channel_node_t) + len);
-  node->next = NULL;
-  node->length = len;
-  memmove(node->payload, msg, len);
 
   if (!channel->list)
   {
