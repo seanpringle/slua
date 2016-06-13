@@ -117,7 +117,7 @@ arena_free (void *pool, void *ptr)
 
   while (!last_page && page_id < arena->pages)
   {
-    last_page = arena->flags[page_id] | (1<<1);
+    last_page = arena->flags[page_id] & (1<<1);
     arena->flags[page_id++] = 0;
   }
 
@@ -132,9 +132,9 @@ arena_dump (void *pool)
   errorf("arena %lu %u %u %u", (uint64_t)pool, arena->bytes, arena->pages, arena->start_scan);
   dump(arena->flags, arena->pages * sizeof(unsigned char));
 
-  for (int page_id = 0; page_id < arena->pages; page_id++)
-  {
-    errorf("page %u %x", page_id, arena->flags[page_id]);
-    dump(arena_page(arena, page_id), arena->page_size);
-  }
+//  for (int page_id = 0; page_id < arena->pages; page_id++)
+//  {
+//    errorf("page %u %x", page_id, arena->flags[page_id]);
+//    dump(arena_page(arena, page_id), arena->page_size);
+//  }
 }
