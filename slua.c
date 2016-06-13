@@ -340,6 +340,8 @@ struct function_map registry_common[] = {
   { .table = "string", .name = "pcrematch", .func = pcre_match   },
   { .table = "io",     .name = "ls",        .func = posix_ls     },
   { .table = "io",     .name = "stat",      .func = posix_stat   },
+  { .table = "os",     .name = "usleep",    .func = posix_usleep },
+  { .table = "os",     .name = "epoch",     .func = posix_epoch  },
 };
 
 struct function_map registry_handler[] = {

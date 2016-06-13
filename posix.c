@@ -196,3 +196,27 @@ posix_stat (lua_State *lua)
   }
   return 1;
 }
+
+int
+posix_usleep(lua_State *lua)
+{
+  usleep(lua_popnumber(lua));
+  return 0;
+}
+
+int
+posix_epoch (lua_State *lua)
+{
+  struct tm time;
+  char scratch[32];
+  const char *fmt = lua_popstring(lua);
+  const char *str = lua_popstring(lua);
+  if (strptime(str, fmt, &time))
+  {
+    strftime(scratch, sizeof(scratch), "%s", &time);
+    lua_pushnumber(lua, strtoll(scratch, NULL, 0));
+  }
+  else
+    lua_pushnil(lua);
+  return 1;
+}
