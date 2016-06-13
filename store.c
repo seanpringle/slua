@@ -22,7 +22,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
 typedef struct {
-  char name[64];
   pthread_mutex_t mutex;
   size_t size;
 } store_t;
@@ -36,16 +35,8 @@ store_arena (store_t *store)
 store_t*
 store_create (const char *name, int size, int page)
 {
-  char ipcname[64];
-  snprintf(ipcname, sizeof(ipcname), "/slua_%d_%s", getpid(), name);
-
-  int fd = shm_open(ipcname, O_CREAT | O_RDWR, S_IRUSR | S_IWUSR);
-  if (fd < 0 || ftruncate(fd, size) != 0) return NULL;
-
-  store_t *store = mmap(0, size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  store_t *store = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
   if (store == MAP_FAILED) return NULL;
-
-  close(fd);
 
   pthread_mutexattr_t mutexattr;
   ensure(pthread_mutexattr_init(&mutexattr) == 0);
@@ -54,7 +45,6 @@ store_create (const char *name, int size, int page)
   pthread_mutexattr_destroy(&mutexattr);
 
   store->size = size;
-  strcpy(store->name, ipcname);
 
   ensure(arena_open(store_arena(store), size - sizeof(store_t), page) == 0);
 
@@ -66,10 +56,7 @@ store_destroy (store_t *store)
 {
   pthread_mutex_destroy(&store->mutex);
   arena_close(store_arena(store));
-  char ipcname[64];
-  strcpy(ipcname, store->name);
   munmap(store, store->size);
-  shm_unlink(ipcname);
 }
 
 void*

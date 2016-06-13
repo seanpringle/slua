@@ -83,7 +83,9 @@ channel_read (channel_t *channel)
   channel->readers++;
 
   int waited = 0;
-  ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
+
+  if (channel->waiters)
+    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   while (channel->backlog == 0)
   {
@@ -102,7 +104,7 @@ channel_read (channel_t *channel)
   if (channel->writers)
     ensure(pthread_cond_signal(&channel->cond_write) == 0);
 
-  if (waited)
+  if (waited && channel->waiters)
     ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   channel->readers--;
@@ -127,7 +129,9 @@ channel_write (channel_t *channel, void *msg, size_t len)
   channel->writers++;
 
   int waited = 0;
-  ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
+
+  if (channel->waiters)
+    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   while (channel->limit > 0 && channel->backlog == channel->limit)
   {
@@ -151,7 +155,7 @@ channel_write (channel_t *channel, void *msg, size_t len)
   if (channel->readers)
     ensure(pthread_cond_signal(&channel->cond_read) == 0);
 
-  if (waited)
+  if (waited && channel->waiters)
     ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   channel->writers--;
@@ -163,8 +167,6 @@ channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, si
 {
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->waiters++;
-
-  ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   if (usec)
   {
@@ -198,6 +200,5 @@ channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, si
   if (writers)
     *writers = channel->writers;
 
-  channel->waiters--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
 }
