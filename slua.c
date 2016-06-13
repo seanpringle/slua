@@ -60,6 +60,8 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define ensure(x) for ( ; !(x) ; exit(EXIT_FAILURE) )
 
+#define str_eq(a,b) (strcmp((a),(b)) == 0)
+
 typedef struct _channel_node_t {
   struct _channel_node_t *next;
   size_t length;
@@ -120,7 +122,6 @@ typedef struct {
   const char *setuid_name;
   size_t max_jobs;
   size_t max_results;
-  const char *db_path;
   const char *ssl_cert;
   const char *ssl_key;
   SSL_CTX *ssl_ctx;
@@ -150,47 +151,12 @@ typedef struct {
 
 shared_t *shared;
 
-#define outputf(...) ({ \
-  if (global.multi) ensure(pthread_mutex_lock(&shared->stdout_mutex) == 0); \
-  fprintf(stdout, __VA_ARGS__); fputc('\n', stdout); \
-  if (global.multi) ensure(pthread_mutex_unlock(&shared->stdout_mutex) == 0); \
-})
-
 #define errorf(...) ({ \
   if (global.multi) ensure(pthread_mutex_lock(&shared->stderr_mutex) == 0); \
   fprintf(stderr, "%d: ", getpid()); \
   fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); \
   if (global.multi) ensure(pthread_mutex_unlock(&shared->stderr_mutex) == 0); \
 })
-
-void
-dump (void *ptr, unsigned int bytes)
-{
-  if (global.multi) ensure(pthread_mutex_lock(&shared->stderr_mutex) == 0);
-
-  unsigned char *e = (unsigned char*)ptr + bytes;
-  for (int i = 0; i < bytes; i += 16)
-  {
-    unsigned char *p = (unsigned char*)ptr + i;
-    fprintf(stderr, "%ld ", (uint64_t)p);
-    for (int j = 0; j < 16; j++)
-    {
-      if (p+j < e)
-        fprintf(stderr, "%02x ", p[j]);
-      else
-        fprintf(stderr, "   ");
-    }
-    for (int j = 0; j < 16; j++)
-    {
-      if (p+j < e)
-        fprintf(stderr, "%c", isalnum(p[j]) ? p[j]: '.');
-      else
-        fprintf(stderr, " ");
-    }
-    fprintf(stderr, "\n");
-  }
-  if (global.multi) ensure(pthread_mutex_unlock(&shared->stderr_mutex) == 0);
-}
 
 #include "arena.c"
 #include "store.c"
@@ -238,13 +204,6 @@ safe_error (lua_State *lua)
   return 0;
 }
 
-#include "str.c"
-#include "work.c"
-#include "posix.c"
-#include "json.c"
-#include "hash.c"
-#include "pcre.c"
-
 int
 request_read (lua_State *lua)
 {
@@ -271,7 +230,7 @@ request_read (lua_State *lua)
 }
 
 int
-request_read_line (lua_State *lua)
+request_line (lua_State *lua)
 {
   lua_pushliteral(lua, "");
 
@@ -300,7 +259,6 @@ request_read_line (lua_State *lua)
     lua_pop(lua, 1);
     lua_pushnil(lua);
   }
-
   return 1;
 }
 
@@ -359,6 +317,10 @@ child_sig_term (int sig)
   child_stop(EXIT_SUCCESS);
 }
 
+#include "work.c"
+#include "hash.c"
+#include "pcre.c"
+
 struct function_map {
   const char *table;
   const char *name;
@@ -366,34 +328,27 @@ struct function_map {
 };
 
 struct function_map registry_common[] = {
-  { .table = "io",    .name = "stat",        .func = posix_stat       },
-  { .table = "io",    .name = "ls",          .func = posix_ls         },
-  { .table = "os",    .name = "usleep",      .func = posix_usleep     },
-  { .table = "os",    .name = "call",        .func = posix_command    },
-  { .table = "table", .name = "json_encode", .func = json_encode      },
-  { .table = "table", .name = "json_decode", .func = json_decode      },
-  { .table = "string",.name = "pcre_match",  .func = pcre_match       },
-  { .table = NULL,    .name = "print",       .func = safe_print       },
-  { .table = NULL,    .name = "eprint",      .func = safe_error       },
-  { .table = "work",  .name = "submit",      .func = work_submit      },
-  { .table = "work",  .name = "accept",      .func = work_accept      },
-  { .table = "work",  .name = "answer",      .func = work_answer      },
-  { .table = "work",  .name = "pool",        .func = work_pool        },
-  { .table = "work",  .name = "idle",        .func = work_idle        },
-  { .table = "work",  .name = "backlog",     .func = work_backlog     },
-  { .table = "string",.name = "md5",         .func = hash_md5         },
-  { .table = "string",.name = "sha1",        .func = hash_sha1        },
-  { .table = "string",.name = "sha256",      .func = hash_sha256      },
-  { .table = "string",.name = "sha512",      .func = hash_sha512      },
-  { .table = "string",.name = "epoch",       .func = posix_strtotime  },
+  { .table = NULL,     .name = "print",     .func = safe_print   },
+  { .table = NULL,     .name = "eprint",    .func = safe_error   },
+  { .table = "work",   .name = "submit",    .func = work_submit  },
+  { .table = "work",   .name = "accept",    .func = work_accept  },
+  { .table = "work",   .name = "answer",    .func = work_answer  },
+  { .table = "work",   .name = "pool",      .func = work_pool    },
+  { .table = "work",   .name = "idle",      .func = work_idle    },
+  { .table = "work",   .name = "backlog",   .func = work_backlog },
+  { .table = "string", .name = "md5",       .func = hash_md5     },
+  { .table = "string", .name = "sha1",      .func = hash_sha1    },
+  { .table = "string", .name = "sha256",    .func = hash_sha256  },
+  { .table = "string", .name = "sha512",    .func = hash_sha512  },
+  { .table = "string", .name = "pcrematch", .func = pcre_match   },
 };
 
 struct function_map registry_handler[] = {
-  { .table = "work",  .name = "collect",     .func = work_collect     },
-  { .table = "work",  .name = "active",      .func = work_active      },
-  { .table = "client",.name = "read",        .func = request_read     },
-  { .table = "client",.name = "read_line",   .func = request_read_line},
-  { .table = "client",.name = "write",       .func = request_write    },
+  { .table = "work",   .name = "collect", .func = work_collect  },
+  { .table = "work",   .name = "active",  .func = work_active   },
+  { .table = "client", .name = "read",    .func = request_read  },
+  { .table = "client", .name = "line",    .func = request_line  },
+  { .table = "client", .name = "write",   .func = request_write },
 };
 
 void
@@ -568,7 +523,6 @@ main (int argc, char const *argv[])
   cfg.setuid_name  = NULL;
   cfg.max_jobs     = 0;
   cfg.max_results  = 0;
-  cfg.db_path      = NULL;
   cfg.ssl_cert     = NULL;
   cfg.ssl_key      = NULL;
   cfg.ssl_ctx      = NULL;
@@ -621,12 +575,6 @@ main (int argc, char const *argv[])
       ensure(argi < argc-1) errorf("expected (-e|--execute) <value>");
       cfg.handler_path = argv[++argi];
       cfg.worker_path  = argv[++argi];
-      continue;
-    }
-    if (str_eq(argv[argi], "-db") || str_eq(argv[argi], "--database"))
-    {
-      ensure(argi < argc-1) errorf("expected (-db|--database) <value>");
-      cfg.db_path = argv[++argi];
       continue;
     }
     if (str_eq(argv[argi], "-mj") || str_eq(argv[argi], "--max-jobs"))

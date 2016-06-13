@@ -85,12 +85,13 @@ arena_alloc (void *pool, unsigned int bytes)
       gap && gap < pages;
       gap = flags[gap] ? 0: gap+1
     );
+
     if (gap == pages)
     {
       unsigned int page_id = flags - arena->flags;
-      memset(&arena->flags[page_id], (1<<0), pages);
+      memset(&arena->flags[page_id], 1, pages);
 
-      arena->flags[page_id+(pages-1)] |= (1<<1);
+      arena->flags[page_id+(pages-1)] = 3;
       ptr = arena_page(arena, page_id);
 
       if (page_id == arena->start_scan)
@@ -125,23 +126,8 @@ arena_free (void *pool, void *ptr)
 
   while (!last_page && page_id < arena->pages)
   {
-    last_page = arena->flags[page_id] & (1<<1);
+    last_page = arena->flags[page_id] & 2;
     arena->flags[page_id++] = 0;
   }
   return 0;
-}
-
-void
-arena_dump (void *pool)
-{
-  arena_t *arena = pool;
-
-  errorf("arena %lu %u %u %u", (uint64_t)pool, arena->bytes, arena->pages, arena->start_scan);
-  dump(arena->flags, arena->pages);
-
-//  for (int page_id = 0; page_id < arena->pages; page_id++)
-//  {
-//    errorf("page %u %x", page_id, arena->flags[page_id]);
-//    dump(arena_page(arena, page_id), arena->page_size);
-//  }
 }
