@@ -58,8 +58,10 @@ pcre_match(lua_State *lua)
 
   if (matches < 0)
   {
+#ifdef PCRE_STUDY_JIT_COMPILE
     if (extra)
       pcre_free_study(extra);
+#endif
     pcre_free(re);
     lua_pushnil(lua);
     return 1;
@@ -83,8 +85,10 @@ pcre_match(lua_State *lua)
 
   free(buffer);
 
+#ifdef PCRE_STUDY_JIT_COMPILE
   if (extra)
     pcre_free_study(extra);
+#endif
   pcre_free(re);
 
   return matches;
