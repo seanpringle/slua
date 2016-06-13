@@ -338,8 +338,8 @@ struct function_map registry_common[] = {
   { .table = "string", .name = "sha256",    .func = hash_sha256  },
   { .table = "string", .name = "sha512",    .func = hash_sha512  },
   { .table = "string", .name = "pcrematch", .func = pcre_match   },
-  { .table = "os",     .name = "ls",        .func = posix_ls     },
-  { .table = "os",     .name = "stat",      .func = posix_stat   },
+  { .table = "io",     .name = "ls",        .func = posix_ls     },
+  { .table = "io",     .name = "stat",      .func = posix_stat   },
 };
 
 struct function_map registry_handler[] = {
