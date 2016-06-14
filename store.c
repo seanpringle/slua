@@ -65,6 +65,7 @@ store_alloc (store_t *store, int len)
   ensure(pthread_mutex_lock(&store->mutex) == 0);
   void *ptr = arena_alloc(store_arena(store), len);
   ensure(pthread_mutex_unlock(&store->mutex) == 0);
+  ensure(ptr) errorf("store is full");
   return ptr;
 }
 
