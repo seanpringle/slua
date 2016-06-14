@@ -106,6 +106,7 @@ typedef struct {
 
 typedef struct {
   int type;
+  int used;
   pid_t pid;
   channel_t results;
   channel_t *result;
@@ -153,6 +154,7 @@ typedef struct {
   pthread_mutex_t stderr_mutex;
   channel_t jobs;
   process_t *workers;
+  process_t *handlers;
 } shared_t;
 
 shared_t *shared;
@@ -384,7 +386,6 @@ child (process_t *process)
 
   if (process->type == HANDLER)
   {
-    channel_init(&process->results, cfg.max_results);
 
     request_t *request = process->request;
 
@@ -436,9 +437,6 @@ child (process_t *process)
       SSL_free(request->ssl);
     }
     close(request->io);
-
-    channel_free(&process->results);
-    store_free(global.store, process);
   }
   else
   {
@@ -465,6 +463,8 @@ start_workers ()
     for (int i = 0; i < cfg.max_workers; i++)
     {
       process_t *process = &shared->workers[i];
+      memset(process, 0, sizeof(process_t));
+      process->used = 1;
       process->type = WORKER;
       process->pid = child(process);
     }
@@ -474,21 +474,71 @@ start_workers ()
 pid_t
 start_handler (request_t *request)
 {
-  process_t *process = store_alloc(global.store, sizeof(process_t));
-  memset(process, 0, sizeof(process_t));
-  process->type = HANDLER;
-  process->request = request;
-  return child(process);
+  for (int i = 0; i < cfg.max_handlers; i++)
+  {
+    process_t *process = &shared->handlers[i];
+    if (!process->used)
+    {
+      memset(process, 0, sizeof(process_t));
+      process->used = 1;
+      process->type = HANDLER;
+      process->request = request;
+      process->pid = child(process);
+      channel_init(&process->results, cfg.max_results);
+      return process->pid;
+    }
+  }
+  return 0;
 }
 
 void
-stop (int rc)
+wait_pids ()
+{
+  int status = 0;
+  pid_t pid = 0;
+  while ((pid = waitpid(-1, &status, WNOHANG)) && pid > 0)
+  {
+    int found = 0;
+    for (int i = 0; !found && i < cfg.max_handlers; i++)
+    {
+      process_t *process = &shared->handlers[i];
+      if (process->used && process->pid == pid)
+      {
+        channel_free(&process->results);
+        memset(process, 0, sizeof(process_t));
+        found = 1;
+      }
+    }
+    for (int i = 0; !found && i < cfg.max_workers; i++)
+    {
+      process_t *process = &shared->workers[i];
+      if (process->used && process->pid == pid)
+      {
+        memset(process, 0, sizeof(process_t));
+        found = 1;
+      }
+    }
+  }
+}
+
+void
+all_stop (int rc)
 {
   if (cfg.worker_path || cfg.worker_code)
   {
     for (int i = 0; i < cfg.max_workers; i++)
     {
       process_t *process = &shared->workers[i];
+      int status = 0;
+      kill(process->pid, SIGTERM);
+      waitpid(process->pid, &status, 0);
+    }
+  }
+  for (int i = 0; i < cfg.max_handlers; i++)
+  {
+    process_t *process = &shared->handlers[i];
+    if (process->used)
+    {
       int status = 0;
       kill(process->pid, SIGTERM);
       waitpid(process->pid, &status, 0);
@@ -502,13 +552,13 @@ stop (int rc)
 void
 sig_int (int sig)
 {
-  stop(EXIT_SUCCESS);
+  all_stop(EXIT_SUCCESS);
 }
 
 void
 sig_term (int sig)
 {
-  stop(EXIT_SUCCESS);
+  all_stop(EXIT_SUCCESS);
 }
 
 int
@@ -672,6 +722,7 @@ main (int argc, char const *argv[])
   global.store = store_create(cfg.shared_mem, cfg.shared_page);
   shared = store_alloc(global.store, sizeof(shared_t));
   shared->workers = store_alloc(global.store, sizeof(process_t) * cfg.max_workers);
+  shared->handlers = store_alloc(global.store, sizeof(process_t) * cfg.max_handlers);
 
   ensure(pthread_mutex_init(&shared->stdout_mutex, &global.mutexattr) == 0);
   ensure(pthread_mutex_init(&shared->stderr_mutex, &global.mutexattr) == 0);
@@ -726,8 +777,7 @@ main (int argc, char const *argv[])
 
     for (;;)
     {
-      int status = 0;
-      while (waitpid(-1, &status, WNOHANG) > 0);
+      wait_pids();
 
       fd = accept(sock_fd, &caddr, &clen);
 
@@ -756,7 +806,7 @@ main (int argc, char const *argv[])
       errorf("accept() failed %d", errno);
       break;
     }
-    stop(EXIT_FAILURE);
+    all_stop(EXIT_FAILURE);
   }
 
   // MODE_STDIN
@@ -772,5 +822,5 @@ main (int argc, char const *argv[])
   int status = 0;
   waitpid(pid, &status, 0);
 
-  stop(status);
+  all_stop(status);
 }
