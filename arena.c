@@ -77,7 +77,7 @@ arena_alloc (void *pool, unsigned int bytes)
   unsigned int gap = 0;
 
   unsigned char *flags = &arena->flags[arena->start_scan];
-  unsigned char *limit = flags + arena->pages;
+  unsigned char *limit = arena->flags + arena->pages;
 
   while (flags < limit && (flags = memchr(flags, 0, limit - flags)) && flags && limit - flags >= pages)
   {
