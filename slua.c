@@ -396,14 +396,6 @@ child (process_t *process)
   ensure((global.lua = luaL_newstate()));
   luaL_openlibs(global.lua);
 
-  if (cfg.setuid_name)
-  {
-    struct passwd *pw = getpwnam(cfg.setuid_name);
-
-    ensure(pw && setuid(pw->pw_uid) == 0)
-      errorf("setuid %s failed", cfg.setuid_name);
-  }
-
   lua_createtable(global.lua, 0, 0);
   lua_setglobal(global.lua, "work");
 
@@ -470,6 +462,30 @@ done:
 
   child_stop(EXIT_SUCCESS);
   return pid;
+}
+
+void
+start_workers ()
+{
+  if (cfg.worker_path || cfg.worker_code)
+  {
+    for (int i = 0; i < cfg.max_workers; i++)
+    {
+      process_t *process = &shared->workers[i];
+      process->type = WORKER;
+      process->pid = child(process);
+    }
+  }
+}
+
+pid_t
+start_handler (request_t *request)
+{
+  process_t *process = store_alloc(global.store, sizeof(process_t));
+  memset(process, 0, sizeof(process_t));
+  process->type = HANDLER;
+  process->request = request;
+  return child(process);
 }
 
 void
@@ -669,7 +685,7 @@ main (int argc, char const *argv[])
   ensure(pthread_mutexattr_init(&global.mutexattr) == 0);
   ensure(pthread_mutexattr_setpshared(&global.mutexattr, PTHREAD_PROCESS_SHARED) == 0);
 
-  global.store = store_create("store", cfg.shared_mem, cfg.shared_page);
+  global.store = store_create(cfg.shared_mem, cfg.shared_page);
   shared = store_alloc(global.store, sizeof(shared_t));
   shared->workers = store_alloc(global.store, sizeof(process_t) * cfg.max_workers);
 
@@ -717,15 +733,7 @@ main (int argc, char const *argv[])
         errorf("setuid %s failed", cfg.setuid_name);
     }
 
-    if (cfg.worker_path || cfg.worker_code)
-    {
-      for (int i = 0; i < cfg.max_workers; i++)
-      {
-        process_t *process = &shared->workers[i];
-        process->type = WORKER;
-        process->pid = child(process);
-      }
-    }
+    start_workers();
 
     int fd;
     struct sockaddr caddr;
@@ -742,17 +750,11 @@ main (int argc, char const *argv[])
       if (fd >= 0)
       {
         request_t r, *request = &r;
-
         memset(request, 0, sizeof(request_t));
         request->io = fd;
         inet_ntop(AF_INET, &caddr, request->ipv4, 16);
 
-        process_t *process = store_alloc(global.store, sizeof(process_t));
-        memset(process, 0, sizeof(process_t));
-        process->type = HANDLER;
-        process->request = request;
-
-        child(process);
+        start_handler(request);
 
         close(fd);
         continue;
@@ -774,28 +776,16 @@ main (int argc, char const *argv[])
   }
 
   // MODE_STDIN
-  request_t r, *request = &r;
 
+  start_workers();
+
+  request_t r, *request = &r;
   memset(request, 0, sizeof(request_t));
   request->io = fileno(stdin);
 
-  process_t *process = store_alloc(global.store, sizeof(process_t));
-  memset(process, 0, sizeof(process_t));
-  process->type = HANDLER;
-  process->request = request;
-
-  if (cfg.worker_path || cfg.worker_code)
-  {
-    for (int i = 0; i < cfg.max_workers; i++)
-    {
-      process_t *process = &shared->workers[i];
-      process->type = WORKER;
-      process->pid = child(process);
-    }
-  }
+  pid_t pid = start_handler(request);
 
   int status = 0;
-  pid_t pid = child(process);
   waitpid(pid, &status, 0);
 
   stop(status);

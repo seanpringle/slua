@@ -33,7 +33,7 @@ store_arena (store_t *store)
 }
 
 store_t*
-store_create (const char *name, int size, int page)
+store_create (int size, int page)
 {
   store_t *store = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
   if (store == MAP_FAILED) return NULL;
