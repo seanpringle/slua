@@ -729,7 +729,7 @@ main (int argc, char const *argv[])
     for (;;)
     {
       int status = 0;
-      waitpid(-1, &status, WNOHANG);
+      waitpid(-1, &status, WEXITED|WNOHANG);
 
       fd = accept(sock_fd, &caddr, &clen);
 
