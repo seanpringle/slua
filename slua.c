@@ -58,6 +58,14 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #define str_eq(a,b) (strcmp((a),(b)) == 0)
 
+static uint32_t
+djb_hash (const char *str)
+{
+  uint32_t hash = 5381;
+  for (int i = 0; str[i]; hash = hash * 33 + str[i++]);
+  return hash;
+}
+
 typedef struct _channel_node_t {
   struct _channel_node_t *next;
   size_t length;

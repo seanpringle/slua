@@ -23,6 +23,16 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <pcre.h>
 
+#define PRIME_100 97
+
+typedef struct {
+  pcre *re;
+  pcre_extra *extra;
+  char *pattern;
+} pcre_cache_t;
+
+pcre_cache_t pcre_cache[PRIME_100];
+
 int
 pcre_match(lua_State *lua)
 {
@@ -32,37 +42,59 @@ pcre_match(lua_State *lua)
   const char *error;
   int erroffset;
   int ovector[100];
+
+  pcre *re = NULL;
   pcre_extra *extra = NULL;
 
-  pcre *re = pcre_compile(pattern, PCRE_DOTALL|PCRE_UTF8, &error, &erroffset, 0);
+  uint32_t hash = djb_hash(pattern) % PRIME_100;
+  pcre_cache_t *cache = &pcre_cache[hash];
 
-  if (!re)
+  if (cache->re && str_eq(pattern, cache->pattern))
   {
-    lua_pushnil(lua);
-    return 1;
+    re = cache->re;
+    extra = cache->extra;
   }
+  else
+  {
+    re = pcre_compile(pattern, PCRE_DOTALL|PCRE_UTF8, &error, &erroffset, 0);
+
+    if (!re)
+    {
+      lua_pushnil(lua);
+      return 1;
+    }
 
 #ifdef PCRE_STUDY_JIT_COMPILE
-  error = NULL;
-  extra = pcre_study(re, PCRE_STUDY_JIT_COMPILE, &error);
+    error = NULL;
+    extra = pcre_study(re, PCRE_STUDY_JIT_COMPILE, &error);
 
-  if (!extra && error)
-  {
-    pcre_free(re);
-    lua_pushnil(lua);
-    return 1;
-  }
+    if (!extra && error)
+    {
+      pcre_free(re);
+      lua_pushnil(lua);
+      return 1;
+    }
 #endif
+
+    if (cache->re)
+    {
+#ifdef PCRE_STUDY_JIT_COMPILE
+      if (cache->extra)
+        pcre_free_study(cache->extra);
+#endif
+      pcre_free(cache->re);
+      free(cache->pattern);
+    }
+
+    cache->re = re;
+    cache->extra = extra;
+    cache->pattern = strdup(pattern);
+  }
 
   int matches = pcre_exec(re, extra, subject, strlen(subject), 0, 0, ovector, sizeof(ovector));
 
   if (matches < 0)
   {
-#ifdef PCRE_STUDY_JIT_COMPILE
-    if (extra)
-      pcre_free_study(extra);
-#endif
-    pcre_free(re);
     lua_pushnil(lua);
     return 1;
   }
@@ -84,12 +116,5 @@ pcre_match(lua_State *lua)
   }
 
   free(buffer);
-
-#ifdef PCRE_STUDY_JIT_COMPILE
-  if (extra)
-    pcre_free_study(extra);
-#endif
-  pcre_free(re);
-
   return matches;
 }
