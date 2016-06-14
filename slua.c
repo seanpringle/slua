@@ -283,7 +283,7 @@ void
 child_stop (int rc)
 {
   process_t *process = global.self;
-  
+
   if (process->type == HANDLER)
   {
     request_t *request = process->request;
@@ -680,16 +680,6 @@ main (int argc, char const *argv[])
 
   channel_init(&shared->jobs, cfg.max_jobs);
 
-  if (cfg.worker_path || cfg.worker_code)
-  {
-    for (int i = 0; i < cfg.max_workers; i++)
-    {
-      process_t *process = &shared->workers[i];
-      process->type = WORKER;
-      process->pid = child(process);
-    }
-  }
-
   signal(SIGINT,  sig_int);
   signal(SIGTERM, sig_term);
   signal(SIGPIPE, SIG_IGN);
@@ -725,6 +715,16 @@ main (int argc, char const *argv[])
 
       ensure(pw && setuid(pw->pw_uid) == 0)
         errorf("setuid %s failed", cfg.setuid_name);
+    }
+
+    if (cfg.worker_path || cfg.worker_code)
+    {
+      for (int i = 0; i < cfg.max_workers; i++)
+      {
+        process_t *process = &shared->workers[i];
+        process->type = WORKER;
+        process->pid = child(process);
+      }
     }
 
     int fd;
@@ -783,6 +783,16 @@ main (int argc, char const *argv[])
   memset(process, 0, sizeof(process_t));
   process->type = HANDLER;
   process->request = request;
+
+  if (cfg.worker_path || cfg.worker_code)
+  {
+    for (int i = 0; i < cfg.max_workers; i++)
+    {
+      process_t *process = &shared->workers[i];
+      process->type = WORKER;
+      process->pid = child(process);
+    }
+  }
 
   int status = 0;
   pid_t pid = child(process);
