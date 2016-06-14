@@ -767,12 +767,12 @@ main (int argc, char const *argv[])
         case EPROTO:
         case ECONNABORTED:
           continue;
-        default:
-          ensure(0) errorf("accept() failed %d", errno);
       }
-    }
 
-    return EXIT_FAILURE;
+      errorf("accept() failed %d", errno);
+      break;
+    }
+    stop(EXIT_FAILURE);
   }
 
   // MODE_STDIN
