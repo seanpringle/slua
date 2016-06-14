@@ -728,6 +728,9 @@ main (int argc, char const *argv[])
 
     for (;;)
     {
+      int status = 0;
+      waitpid(-1, &status, WNOHANG);
+
       fd = accept(sock_fd, &caddr, &clen);
 
       if (fd >= 0)
