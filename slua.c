@@ -283,9 +283,9 @@ void
 child_stop (int rc)
 {
   process_t *process = global.self;
+  
   if (process->type == HANDLER)
   {
-    channel_free(&process->results);
     request_t *request = process->request;
     if (request->ssl)
     {
@@ -293,24 +293,30 @@ child_stop (int rc)
       SSL_free(request->ssl);
     }
     close(request->io);
-
-    if (process->type == HANDLER)
-      store_free(global.store, process);
   }
-  lua_close(global.lua);
+
+  if (rc == EXIT_SUCCESS)
+  {
+    if (process->type == HANDLER)
+    {
+      channel_free(&process->results);
+      store_free(global.store, process);
+    }
+    lua_close(global.lua);
+  }
   exit(rc);
 }
 
 void
 child_sig_int (int sig)
 {
-  child_stop(EXIT_SUCCESS);
+  child_stop(EXIT_FAILURE);
 }
 
 void
 child_sig_term (int sig)
 {
-  child_stop(EXIT_SUCCESS);
+  child_stop(EXIT_FAILURE);
 }
 
 #include "work.c"
@@ -729,7 +735,7 @@ main (int argc, char const *argv[])
     for (;;)
     {
       int status = 0;
-      waitpid(-1, &status, WEXITED|WNOHANG);
+      while (waitpid(-1, &status, WNOHANG) > 0);
 
       fd = accept(sock_fd, &caddr, &clen);
 
@@ -747,6 +753,8 @@ main (int argc, char const *argv[])
         process->request = request;
 
         child(process);
+
+        close(fd);
         continue;
       }
 
