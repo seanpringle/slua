@@ -528,13 +528,13 @@ main (int argc, char const *argv[])
   cfg.worker_path  = NULL;
   cfg.worker_code  = NULL;
   cfg.setuid_name  = NULL;
-  cfg.max_jobs     = 0;
+  cfg.max_jobs     = cores * 10;
   cfg.max_results  = 0;
   cfg.ssl_cert     = NULL;
   cfg.ssl_key      = NULL;
   cfg.ssl_ctx      = NULL;
-  cfg.shared_mem   = 32 * 1024 * 1024;
-  cfg.shared_page  = 1024;
+  cfg.shared_mem   = cores * 1024 * 1024;
+  cfg.shared_page  = 256;
 
   struct stat st;
 
