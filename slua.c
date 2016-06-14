@@ -280,43 +280,15 @@ request_write (lua_State *lua)
 }
 
 void
-child_stop (int rc)
-{
-  process_t *process = global.self;
-
-  if (process->type == HANDLER)
-  {
-    request_t *request = process->request;
-    if (request->ssl)
-    {
-      SSL_shutdown(request->ssl);
-      SSL_free(request->ssl);
-    }
-    close(request->io);
-  }
-
-  if (rc == EXIT_SUCCESS)
-  {
-    if (process->type == HANDLER)
-    {
-      channel_free(&process->results);
-      store_free(global.store, process);
-    }
-    lua_close(global.lua);
-  }
-  exit(rc);
-}
-
-void
 child_sig_int (int sig)
 {
-  child_stop(EXIT_FAILURE);
+  exit(EXIT_FAILURE);
 }
 
 void
 child_sig_term (int sig)
 {
-  child_stop(EXIT_FAILURE);
+  exit(EXIT_FAILURE);
 }
 
 #include "work.c"
@@ -386,6 +358,7 @@ child (process_t *process)
 {
   pid_t pid = fork();
   if (pid) return pid;
+  int rc = EXIT_SUCCESS;
 
   global.self = process;
 
@@ -444,8 +417,18 @@ child (process_t *process)
       || (cfg.handler_code && luaL_dostring(global.lua, cfg.handler_code) != 0))
     {
       errorf("handler lua error: %s", lua_tostring(global.lua, -1));
-      child_stop(EXIT_FAILURE);
+      rc = EXIT_FAILURE;
     }
+
+    if (request->ssl)
+    {
+      SSL_shutdown(request->ssl);
+      SSL_free(request->ssl);
+    }
+    close(request->io);
+
+    channel_free(&process->results);
+    store_free(global.store, process);
   }
   else
   {
@@ -455,12 +438,12 @@ child (process_t *process)
       || (cfg.worker_code && luaL_dostring(global.lua, cfg.worker_code) != 0))
     {
       errorf("worker lua error: %s", lua_tostring(global.lua, -1));
-      child_stop(EXIT_FAILURE);
+      rc = EXIT_FAILURE;
     }
   }
 done:
-
-  child_stop(EXIT_SUCCESS);
+  lua_close(global.lua);
+  exit(rc);
   return pid;
 }
 
@@ -501,16 +484,7 @@ stop (int rc)
       waitpid(process->pid, &status, 0);
     }
   }
-
-  //arena_dump(store_arena(global.store));
-
-  pthread_mutex_destroy(&shared->stdout_mutex);
-  pthread_mutex_destroy(&shared->stderr_mutex);
-  pthread_mutexattr_destroy(&global.mutexattr);
-  pthread_condattr_destroy(&global.condattr);
-
   global.multi = 0;
-
   store_destroy(global.store);
   exit(rc);
 }
