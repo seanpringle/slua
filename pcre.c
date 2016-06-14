@@ -23,8 +23,6 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 #include <pcre.h>
 
-#define PRIME_100 97
-
 typedef struct {
   pcre *re;
   pcre_extra *extra;
