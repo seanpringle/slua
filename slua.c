@@ -430,7 +430,6 @@ child (process_t *process)
       errorf("handler lua error: %s", lua_tostring(global.lua, -1));
       rc = EXIT_FAILURE;
     }
-
     if (request->ssl)
     {
       SSL_shutdown(request->ssl);
@@ -504,6 +503,8 @@ wait_pids ()
       process_t *process = &shared->handlers[i];
       if (process->used && process->pid == pid)
       {
+        if (status != EXIT_SUCCESS)
+          errorf("handler %d exited with %d", process->pid, status);
         channel_free(&process->results);
         memset(process, 0, sizeof(process_t));
         found = 1;
@@ -514,6 +515,8 @@ wait_pids ()
       process_t *process = &shared->workers[i];
       if (process->used && process->pid == pid)
       {
+        if (status != EXIT_SUCCESS)
+          errorf("worker %d exited with %d", process->pid, status);
         memset(process, 0, sizeof(process_t));
         found = 1;
       }
