@@ -121,7 +121,7 @@ work_active (lua_State *lua)
 
   for (;;)
   {
-    channel_counters(&global.self->results, NULL, &backlog, NULL, &writers);
+    channel_counters(&shared->jobs, NULL, &backlog, &readers, &writers);
 
     if (backlog > 0 || writers > 0)
     {
@@ -129,7 +129,7 @@ work_active (lua_State *lua)
       return 1;
     }
 
-    channel_counters(&shared->jobs, NULL, &backlog, &readers, &writers);
+    channel_counters(&global.self->results, NULL, &backlog, NULL, &writers);
 
     if (backlog > 0 || writers > 0)
     {
