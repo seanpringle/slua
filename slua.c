@@ -78,14 +78,12 @@ typedef struct {
   pthread_mutex_t mutex;
   pthread_cond_t cond_read;
   pthread_cond_t cond_write;
-  pthread_cond_t cond_active;
   channel_node_t *list;
   channel_node_t *last;
   size_t limit;
   size_t backlog;
   size_t readers;
   size_t writers;
-  size_t waiters;
   int used;
 } channel_t;
 

@@ -99,14 +99,18 @@ work_pool (lua_State *lua)
 int
 work_idle (lua_State *lua)
 {
-  lua_pushnumber(lua, channel_readers(&shared->jobs));
+  size_t readers;
+  channel_counters(&shared->jobs, NULL, &readers, NULL, NULL);
+  lua_pushnumber(lua, readers);
   return 1;
 }
 
 int
 work_backlog (lua_State *lua)
 {
-  lua_pushnumber(lua, channel_backlog(&shared->jobs));
+  size_t backlog;
+  channel_counters(&shared->jobs, NULL, &backlog, NULL, NULL);
+  lua_pushnumber(lua, backlog);
   return 1;
 }
 
@@ -115,17 +119,19 @@ work_active (lua_State *lua)
 {
   size_t readers, writers, backlog;
 
-  if (channel_backlog(&global.self->results) > 0)
-  {
-    lua_pushboolean(lua, 1);
-    return 1;
-  }
-
   for (;;)
   {
-    channel_wait(&shared->jobs, 100000, &backlog, &readers, &writers);
+    channel_counters(&global.self->results, NULL, &backlog, NULL, &writers);
 
-    if (backlog > 0 || channel_backlog(&global.self->results) > 0)
+    if (backlog > 0 || writers > 0)
+    {
+      lua_pushboolean(lua, 1);
+      return 1;
+    }
+
+    channel_counters(&shared->jobs, NULL, &backlog, &readers, &writers);
+
+    if (backlog > 0 || writers > 0)
     {
       lua_pushboolean(lua, 1);
       return 1;
@@ -136,5 +142,7 @@ work_active (lua_State *lua)
       lua_pushboolean(lua, 0);
       return 1;
     }
+
+    usleep(1000);
   }
 }

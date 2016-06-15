@@ -28,14 +28,12 @@ channel_init (channel_t *channel, size_t limit)
   channel->backlog = 0;
   channel->readers = 0;
   channel->writers = 0;
-  channel->waiters = 0;
   channel->limit = limit;
   channel->list = NULL;
   channel->last = NULL;
   ensure(pthread_mutex_init(&channel->mutex, &global.mutexattr) == 0);
   ensure(pthread_cond_init(&channel->cond_read, &global.condattr) == 0);
   ensure(pthread_cond_init(&channel->cond_write, &global.condattr) == 0);
-  ensure(pthread_cond_init(&channel->cond_active, &global.condattr) == 0);
 }
 
 void
@@ -52,28 +50,9 @@ channel_free (channel_t *channel)
     pthread_mutex_destroy(&channel->mutex);
     pthread_cond_destroy(&channel->cond_read);
     pthread_cond_destroy(&channel->cond_write);
-    pthread_cond_destroy(&channel->cond_active);
     store_free(global.store, channel->list);
     channel->used = 0;
   }
-}
-
-size_t
-channel_backlog (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  size_t backlog = channel->backlog;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return backlog;
-}
-
-size_t
-channel_readers (channel_t *channel)
-{
-  ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  size_t readers = channel->readers;
-  ensure(pthread_mutex_unlock(&channel->mutex) == 0);
-  return readers;
 }
 
 void*
@@ -82,16 +61,8 @@ channel_read (channel_t *channel)
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->readers++;
 
-  int waited = 0;
-
-  if (channel->waiters)
-    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
-
   while (channel->backlog == 0)
-  {
-    waited = 1;
     ensure(pthread_cond_wait(&channel->cond_read, &channel->mutex) == 0);
-  }
 
   channel->backlog--;
 
@@ -103,9 +74,6 @@ channel_read (channel_t *channel)
 
   if (channel->writers)
     ensure(pthread_cond_signal(&channel->cond_write) == 0);
-
-  if (waited && channel->waiters)
-    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
 
   channel->readers--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
@@ -128,16 +96,8 @@ channel_write (channel_t *channel, void *msg, size_t len)
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
   channel->writers++;
 
-  int waited = 0;
-
-  if (channel->waiters)
-    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
-
   while (channel->limit > 0 && channel->backlog == channel->limit)
-  {
-    waited = 1;
     ensure(pthread_cond_wait(&channel->cond_write, &channel->mutex) == 0);
-  }
 
   channel->backlog++;
 
@@ -155,50 +115,17 @@ channel_write (channel_t *channel, void *msg, size_t len)
   if (channel->readers)
     ensure(pthread_cond_signal(&channel->cond_read) == 0);
 
-  if (waited && channel->waiters)
-    ensure(pthread_cond_broadcast(&channel->cond_active) == 0);
-
   channel->writers--;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
 }
 
 void
-channel_wait (channel_t *channel, int usec, size_t *backlog, size_t *readers, size_t *writers)
+channel_counters (channel_t *channel, size_t *limit, size_t *backlog, size_t *readers, size_t *writers)
 {
   ensure(pthread_mutex_lock(&channel->mutex) == 0);
-  channel->waiters++;
-
-  if (usec)
-  {
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-
-    time_t sec = 0;
-    long nsec = ts.tv_nsec + (usec * 1000);
-
-    sec += nsec / 1000000000L;
-    nsec = nsec % 1000000000L;
-
-    ts.tv_sec = sec;
-    ts.tv_nsec = nsec;
-
-    int rc = pthread_cond_timedwait(&channel->cond_active, &channel->mutex, &ts);
-    ensure(rc == 0 || rc == ETIMEDOUT);
-  }
-  else
-  {
-    int rc = pthread_cond_wait(&channel->cond_active, &channel->mutex);
-    ensure(rc == 0);
-  }
-
-  if (backlog)
-    *backlog = channel->backlog;
-
-  if (readers)
-    *readers = channel->readers;
-
-  if (writers)
-    *writers = channel->writers;
-
+  if (limit)   *limit   = channel->limit;
+  if (backlog) *backlog = channel->backlog;
+  if (readers) *readers = channel->readers;
+  if (writers) *writers = channel->writers;
   ensure(pthread_mutex_unlock(&channel->mutex) == 0);
 }
