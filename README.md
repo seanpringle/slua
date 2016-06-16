@@ -4,7 +4,7 @@ Multi-process Lua with channel-based IPC.
 
 ## Normal Mode
 
-* One Lua process, like the stand-alone Lua interpreter
+* One Lua process, like the stand-alone Lua interpreter with a few extra built-in functions
 
 ```
 $ slua 'print("hello world")'
@@ -16,7 +16,7 @@ $ slua 'print("hello world")'
 * Mutiple Lua workers processing jobs
 
 ```lua
-# handler.lua
+-- handler.lua
 
 work.submit('hello')
 work.submit('goodbye')
@@ -26,7 +26,7 @@ print(work.collect())
 print(work.collect())
 print(work.collect())
 
-# worker.lua
+-- worker.lua
 
 while true do
   work.answer(work.accept() .. 'world')
