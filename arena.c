@@ -33,7 +33,7 @@ static void*
 arena_data (arena_t *arena)
 {
   size_t offset = sizeof(arena_t) + arena->pages;
-  return (void*)arena + offset + (offset % sizeof(void*) ? (sizeof(void*) - (offset % sizeof(void*))): 0);
+  return (void*)arena + offset + (offset % sizeof(void*) ? (sizeof(void*) - (offset % sizeof(void*))): 0); // aligned
 }
 
 static void*
