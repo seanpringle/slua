@@ -38,11 +38,7 @@ store_create (int size, int page)
   store_t *store = mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_ANONYMOUS | MAP_SHARED, 0, 0);
   if (store == MAP_FAILED) return NULL;
 
-  pthread_mutexattr_t mutexattr;
-  ensure(pthread_mutexattr_init(&mutexattr) == 0);
-  ensure(pthread_mutexattr_setpshared(&mutexattr, PTHREAD_PROCESS_SHARED) == 0);
-  ensure(pthread_mutex_init(&store->mutex, &mutexattr) == 0);
-  pthread_mutexattr_destroy(&mutexattr);
+  ensure(pthread_mutex_init(&store->mutex, &global.mutexattr) == 0);
 
   store->size = size;
 
