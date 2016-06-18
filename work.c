@@ -21,18 +21,25 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+unsigned char msgbuf[1024];
+
 void
 message_send (channel_t *send, channel_t *recv, const char *payload)
 {
   size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
 
-  message_t *msg = calloc(length, 1);
+  message_t *msg = length <= sizeof(msgbuf) ? (message_t*)(&msgbuf): malloc(length);
+  memset(msg, 0, sizeof(message_t));
+
   msg->is_nil = payload ? 0:1;
   msg->respond = recv;
-  if (payload) strcpy(msg->payload, payload);
+
+  if (payload)
+    strcpy(msg->payload, payload);
 
   channel_write(send, msg, length);
-  free(msg);
+
+  if (length > sizeof(msgbuf)) free(msg);
 }
 
 int

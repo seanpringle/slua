@@ -573,7 +573,7 @@ main (int argc, char const *argv[])
   cfg.tcp_port     = 0;
   cfg.tcp_backlog  = 32;
   cfg.max_workers  = cores;
-  cfg.max_handlers = 1;
+  cfg.max_handlers = cores;
   cfg.handler_path = NULL;
   cfg.handler_code = NULL;
   cfg.worker_path  = NULL;
@@ -702,8 +702,8 @@ main (int argc, char const *argv[])
   if (cfg.handler_path)
     cfg.handler_code = NULL;
 
-  if (cfg.mode == MODE_TCP && cfg.max_handlers == 1)
-    cfg.max_handlers = max(4, cores);
+  if (cfg.mode == MODE_STDIN)
+    cfg.max_handlers = 1;
 
   ensure(cfg.handler_path || cfg.handler_code)
     errorf("expected lua -r script or inline code");
