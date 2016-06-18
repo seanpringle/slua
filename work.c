@@ -21,6 +21,20 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 */
 
+void
+message_send (channel_t *send, channel_t *recv, const char *payload)
+{
+  size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
+
+  message_t *msg = calloc(length, 1);
+  msg->is_nil = payload ? 0:1;
+  msg->respond = recv;
+  if (payload) strcpy(msg->payload, payload);
+
+  channel_write(send, msg, length);
+  free(msg);
+}
+
 int
 work_accept (lua_State *lua)
 {
@@ -43,16 +57,7 @@ int
 work_answer (lua_State *lua)
 {
   char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
-  size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
-
-  message_t *msg = calloc(length, 1);
-  msg->is_nil = payload ? 0:1;
-  msg->respond = NULL;
-  if (payload) strcpy(msg->payload, payload);
-
-  channel_write(global.self->result, msg, length);
-
-  free(msg);
+  message_send(global.self->result, NULL, payload);
   return 0;
 }
 
@@ -63,16 +68,7 @@ work_submit (lua_State *lua)
     errorf("no workers");
 
   char *payload = lua_type(lua, -1) == LUA_TSTRING ? (char*)lua_popstring(lua): NULL;
-  size_t length = sizeof(message_t) + (payload ? strlen(payload)+1: 0);
-
-  message_t *msg = calloc(length, 1);
-  msg->is_nil = payload ? 0:1;
-  msg->respond = global.self->type == HANDLER ? &global.self->results: global.self->result;
-  if (payload) strcpy(msg->payload, payload);
-
-  channel_write(&shared->jobs, msg, length);
-
-  free(msg);
+  message_send(&shared->jobs, global.self->type == HANDLER ? &global.self->results: global.self->result, payload);
   return 0;
 }
 
