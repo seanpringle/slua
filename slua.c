@@ -468,26 +468,6 @@ start_workers ()
   }
 }
 
-pid_t
-start_handler (request_t *request)
-{
-  for (int i = 0; i < cfg.max_handlers; i++)
-  {
-    process_t *process = &shared->handlers[i];
-    if (!process->used)
-    {
-      memset(process, 0, sizeof(process_t));
-      process->used = 1;
-      process->type = HANDLER;
-      process->request = request;
-      process->pid = child(process);
-      channel_init(&process->results, cfg.max_results);
-      return process->pid;
-    }
-  }
-  return 0;
-}
-
 void
 wait_pids ()
 {
@@ -520,6 +500,31 @@ wait_pids ()
       }
     }
   }
+}
+
+pid_t
+start_handler (request_t *request)
+{
+  for (int tries = 0; tries < 3; tries++)
+  {
+    for (int i = 0; i < cfg.max_handlers; i++)
+    {
+      process_t *process = &shared->handlers[i];
+      if (!process->used)
+      {
+        memset(process, 0, sizeof(process_t));
+        process->used = 1;
+        process->type = HANDLER;
+        process->request = request;
+        process->pid = child(process);
+        channel_init(&process->results, cfg.max_results);
+        return process->pid;
+      }
+    }
+    usleep(10000);
+    wait_pids();
+  }
+  return 0;
 }
 
 void
