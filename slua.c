@@ -710,6 +710,9 @@ main (int argc, char const *argv[])
   if (cfg.mode == MODE_STDIN)
     cfg.max_handlers = 1;
 
+  if (cfg.mode == MODE_TCP)
+    cfg.max_handlers = max(cfg.max_handlers, 2);
+
   ensure(cfg.handler_path || cfg.handler_code)
     errorf("expected lua -r script or inline code");
 
