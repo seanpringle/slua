@@ -524,6 +524,7 @@ start_handler (request_t *request)
     usleep(10000);
     wait_pids();
   }
+  errorf("cfg.max_handlers is too small");
   return 0;
 }
 
