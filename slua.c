@@ -305,6 +305,8 @@ child_sig_term (int sig)
 #include "hash.c"
 #include "pcre.c"
 #include "posix.c"
+#include "str.c"
+#include "json.c"
 
 struct function_map {
   const char *table;
@@ -330,6 +332,8 @@ struct function_map registry_common[] = {
   { .table = "io",     .name = "stat",      .func = posix_stat   },
   { .table = "os",     .name = "usleep",    .func = posix_usleep },
   { .table = "string", .name = "epoch",     .func = posix_epoch  },
+  { .table = "json",   .name = "encode",    .func = json_encode  },
+  { .table = "json",   .name = "decode",    .func = json_decode  },
 };
 
 struct function_map registry_handler[] = {
@@ -378,6 +382,9 @@ child (process_t *process)
 
   ensure((global.lua = luaL_newstate()));
   luaL_openlibs(global.lua);
+
+  lua_createtable(global.lua, 0, 0);
+  lua_setglobal(global.lua, "json");
 
   lua_createtable(global.lua, 0, 0);
   lua_setglobal(global.lua, "work");
