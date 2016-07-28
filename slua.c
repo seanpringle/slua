@@ -424,6 +424,11 @@ child (process_t *process)
     }
 
     lua_createtable(global.lua, 0, 0);
+
+    lua_pushstring(global.lua, "ip");
+    lua_pushstring(global.lua, request->ipv4);
+    lua_settable(global.lua, -3);
+
     lua_setglobal(global.lua, "client");
 
     lua_functions(global.lua, registry_common, sizeof(registry_common) / sizeof(struct function_map));
