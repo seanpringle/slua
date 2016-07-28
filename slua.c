@@ -89,7 +89,7 @@ typedef struct {
 
 typedef struct {
   int io;
-  char ipv4[16];
+  char ipv4[INET_ADDRSTRLEN];
   SSL *ssl;
 } request_t;
 
@@ -808,7 +808,9 @@ main (int argc, char const *argv[])
         request_t r, *request = &r;
         memset(request, 0, sizeof(request_t));
         request->io = fd;
-        inet_ntop(AF_INET, &caddr, request->ipv4, 16);
+
+        struct sockaddr_in *addr_in = (struct sockaddr_in *)(&caddr);
+        inet_ntop(AF_INET, &(addr_in->sin_addr), request->ipv4, 16);
 
         start_handler(request);
 
