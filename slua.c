@@ -52,6 +52,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <lualib.h>
 
 #define PRIME_100 97
+#define PRIME_10 7
 
 #define min(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a < _b ? _a: _b; })
 #define max(a,b) ({ __typeof__(a) _a = (a); __typeof__(b) _b = (b); _a > _b ? _a: _b; })
@@ -301,11 +302,11 @@ child_sig_term (int sig)
   exit(EXIT_FAILURE);
 }
 
+#include "str.c"
 #include "work.c"
 #include "hash.c"
 #include "pcre.c"
 #include "posix.c"
-#include "str.c"
 #include "json.c"
 
 struct function_map {

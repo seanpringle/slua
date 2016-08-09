@@ -222,6 +222,14 @@ posix_epoch (lua_State *lua)
   return 1;
 }
 
+typedef struct {
+  char *from;
+  char *to;
+  iconv_t cd;
+} iconv_cache_t;
+
+iconv_cache_t iconv_cache[PRIME_10];
+
 int
 posix_iconv (lua_State *lua)
 {
@@ -232,11 +240,37 @@ posix_iconv (lua_State *lua)
   char *str  = (char*)lua_popstring(lua);
 
   size_t slen = strlen(str);
+
   char *copy = malloc(slen*4+1);
   memset(copy, 0, slen*4+1);
 
-  iconv_t cd = iconv_open(to, from);
-  err = cd == (iconv_t)-1 ? errno: 0;
+  uint32_t hash = djb_hash(from) % PRIME_10;
+  iconv_cache_t *cache = &iconv_cache[hash];
+
+  iconv_t cd;
+
+  if (cache->from && str_eq(from, cache->from) && str_eq(to, cache->to))
+  {
+    cd = cache->cd;
+  }
+  else
+  {
+    cd = iconv_open(to, from);
+    err = cd == (iconv_t)-1 ? errno: 0;
+
+    if (err == 0)
+    {
+      if (cache->from)
+      {
+        free(cache->from);
+        free(cache->to);
+        iconv_close(cache->cd);
+      }
+      cache->from = strdup(from);
+      cache->to = strdup(to);
+      cache->cd = cd;
+    }
+  }
 
   if (err == 0)
   {
@@ -245,8 +279,6 @@ posix_iconv (lua_State *lua)
 
     size_t rs = iconv(cd, &s, &sl, &d, &dl);
     err = (rs == -1) ? errno: 0;
-
-    iconv_close(cd);
   }
 
   lua_pushboolean(lua, err == 0);
