@@ -72,5 +72,6 @@ really, goodbye world
 | `work.backlog()` | Length of the job queue. |
 | `work.collect()` | Collect a job result. (Handlers only) |
 | `work.idle()` | Number of idle workers. |
+| `work.job` | The current job, set by each call to `work.accept()`. |
 | `work.pool()` | Number of workers. |
 | `work.submit(str)` | Submit a job to the queue. |
