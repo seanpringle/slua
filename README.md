@@ -75,3 +75,20 @@ really, goodbye world
 | `work.job` | The current job, set by each call to `work.accept()`. |
 | `work.pool()` | Number of workers. |
 | `work.submit(str)` | Submit a job to the queue. |
+
+## Command line arguments
+
+| Argument | Long Form | Description |
+| --- | --- | --- |
+| -p *port* | --port *port* | TCP listen on *port*. |
+| -su *user* | --setuid *user* | Switch to *user* (`setuid()`). |
+| -w *path* | --worker *path* | Worker script. |
+| -wp *size* | --worker-pool *size* | Worker pool size. |
+| -h *path* | --handler *path* | Handler script. |
+| -hp *size* | --handler-pool *size* | Handler maximum pool size. |
+| -mj *value* | --max-jobs *value* | Maximum concurrent queued jobs. |
+| -mr *value* | --max-results *value* | Maximum concurrent queued results per Handler. |
+| -sh *MB* | --shared-memory *MB* | Amount of shared memory in MB to allocate for IPC. |
+| -sp *B* | --shared-page *B* | Size of a page within shared memory (unlikely this would need changing). |
+| n/a | --ssl-cert *path* | TCP SSL mode. Requires `--ssl-key` and `-p`. Implicitly turns on SSL mode. |
+| n/a | --ssl-key *path* | TCP SSL mode. |
