@@ -47,7 +47,7 @@ really, goodbye world
 
 ## Lua Libaries
 
-The Lua instances in each process are normal, so `require()` and `LUA_PATH` should behave as expected.
+The Lua instance in each process is normal, so `require()` and `LUA_PATH` should behave as expected.
 
 ## Non-standard Lua functions
 
