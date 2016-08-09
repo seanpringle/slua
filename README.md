@@ -45,7 +45,15 @@ really, goodbye world
 * Mutiple Lua handlers submitting jobs, TCP I/O (optionally SSL)
 * Mutiple Lua workers processing jobs
 
+## Lua Libaries
+
+The Lua instances in each process are normal, so `require()` and `LUA_PATH` should behave as expected.
+
 ## Non-standard Lua functions
+
+Some of this functionality duplicates perfectly good community libraries. The intention isn't to re-invent a bunch of wheels, but to provide a little more variety in the standard library, plus take advantage of functionality offered by libraries that are going to be linked anyway (eg, OpenSSL).
+
+The JSON methods are the exception: they're fine for basic tasks, but should probably be overriden for serious stuff.
 
 | Function | Description |
 | --- | --- |
