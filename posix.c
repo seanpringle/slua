@@ -231,8 +231,6 @@ posix_iconv (lua_State *lua)
   char *from = (char*)lua_popstring(lua);
   char *str  = (char*)lua_popstring(lua);
 
-  errorf("string: %s, from: %s, to: %s\n", str, from, to);
-
   size_t slen = strlen(str);
   char *copy = malloc(slen*4+1);
   memset(copy, 0, slen*4+1);
