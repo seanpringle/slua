@@ -25,6 +25,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 #include <dirent.h>
 #include <pwd.h>
 #include <grp.h>
+#include <iconv.h>
 
 int
 posix_ls (lua_State *lua)
@@ -219,4 +220,40 @@ posix_epoch (lua_State *lua)
   else
     lua_pushnil(lua);
   return 1;
+}
+
+int
+posix_iconv (lua_State *lua)
+{
+  int err = 0;
+
+  char *to   = (char*)lua_popstring(lua);
+  char *from = (char*)lua_popstring(lua);
+  char *str  = (char*)lua_popstring(lua);
+
+  errorf("string: %s, from: %s, to: %s\n", str, from, to);
+
+  size_t slen = strlen(str);
+  char *copy = malloc(slen*4+1);
+  memset(copy, 0, slen*4+1);
+
+  iconv_t cd = iconv_open(to, from);
+  err = cd == (iconv_t)-1 ? errno: 0;
+
+  if (err == 0)
+  {
+    size_t sl = slen, dl = slen*4+1;
+    char *s = str, *d = copy;
+
+    size_t rs = iconv(cd, &s, &sl, &d, &dl);
+    err = (rs == -1) ? errno: 0;
+
+    iconv_close(cd);
+  }
+
+  lua_pushboolean(lua, err == 0);
+  lua_pushstring(lua, err ? strerror(err): copy);
+
+  free(copy);
+  return 2;
 }

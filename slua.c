@@ -332,6 +332,7 @@ struct function_map registry_common[] = {
   { .table = "io",     .name = "stat",      .func = posix_stat   },
   { .table = "os",     .name = "usleep",    .func = posix_usleep },
   { .table = "string", .name = "epoch",     .func = posix_epoch  },
+  { .table = "string", .name = "iconv",     .func = posix_iconv  },
   { .table = "json",   .name = "encode",    .func = json_encode  },
   { .table = "json",   .name = "decode",    .func = json_decode  },
 };
