@@ -49,7 +49,7 @@ really, goodbye world
 
 Currently jobs must be strings. For example, there is no mechanism (yet) to move tables between processes except via serialization.
 
-## Lua Libaries
+## Lua Libraries
 
 The Lua instance in each process is normal, so `require()` and `LUA_PATH` should behave as expected.
 
