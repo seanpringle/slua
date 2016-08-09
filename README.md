@@ -53,7 +53,7 @@ The Lua instance in each process is normal, so `require()` and `LUA_PATH` should
 
 Some of this functionality duplicates perfectly good community libraries. The intention isn't to re-invent a bunch of wheels, but to provide a little more variety in the standard library, plus take advantage of functionality offered by libraries that are going to be linked anyway (eg, OpenSSL).
 
-The JSON methods are the exception: they're fine for basic tasks, but should probably be overriden for serious stuff.
+The JSON methods are the exception: they're fine for basic tasks, but should probably be overriden for serious stuff (probably slower than Lua CJSON, for example).
 
 | Function | Description |
 | --- | --- |
