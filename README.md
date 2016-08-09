@@ -45,6 +45,10 @@ really, goodbye world
 * Mutiple Lua handlers submitting jobs, TCP I/O (optionally SSL)
 * Mutiple Lua workers processing jobs
 
+## Jobs
+
+Currently jobs must be strings. For example, there is no mechanism (yet) to move tables between processes except via serialization.
+
 ## Lua Libaries
 
 The Lua instance in each process is normal, so `require()` and `LUA_PATH` should behave as expected.
