@@ -190,19 +190,19 @@ json_decode_step (lua_State *lua, char *json, int mode)
 
       case 'n':
         lua_pushnil(lua);
-        while (json && *json && !strchr(", \t\r\n", *json)) json++;
+        while (json && *json && isalpha(*json)) json++;
         pushed++;
         break;
 
       case 't':
         lua_pushboolean(lua, 1);
-        while (json && *json && !strchr(", \t\r\n", *json)) json++;
+        while (json && *json && isalpha(*json)) json++;
         pushed++;
         break;
 
       case 'f':
         lua_pushboolean(lua, 0);
-        while (json && *json && !strchr(", \t\r\n", *json)) json++;
+        while (json && *json && isalpha(*json)) json++;
         pushed++;
         break;
 
